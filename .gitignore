@@ -1,0 +1,51 @@
+# ── Environment files ─────────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+.env.production
+.env.development
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# ── Local SQLite (dev only — production uses PostgreSQL) ──────────────────────
+backend/candidates.db
+backend/*.db
+
+# ── Piper TTS binary + voice models (too large for git) ──────────────────────
+backend/piper/
+backend/models/
+
+# ── Node / Next.js ────────────────────────────────────────────────────────────
+node_modules/
+.next/
+out/
+frontend/.next/
+frontend/out/
+frontend/node_modules/
+
+# ── Build artefacts ───────────────────────────────────────────────────────────
+*.tsbuildinfo
+frontend/tsconfig.tsbuildinfo
+
+# ── OS / editor ──────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ── Misc ─────────────────────────────────────────────────────────────────────
+*.log
+backend/=*
