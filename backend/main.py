@@ -3,6 +3,7 @@ import base64
 import json
 import os
 import pathlib
+import random
 import re
 import secrets
 import subprocess
@@ -51,6 +52,16 @@ app.add_middleware(
 
 groq_client   = Groq(api_key=os.getenv("GROQ_API_KEY"))
 SARVAM_API_KEY = os.getenv("SARVAM_API_KEY", "")
+
+# Persistent HTTP client — reuses TLS connections across Sarvam TTS calls.
+_http_client = httpx.AsyncClient(
+    limits=httpx.Limits(max_keepalive_connections=5),
+    timeout=12.0,
+)
+
+# Pre-baked filler audio bytes, populated at startup by _prebake_fillers().
+_FILLER_TEXTS = ["Hmm.", "Interesting.", "I see."]
+_filler_audio: dict[str, bytes] = {}
 
 
 def clean_text_for_sarvam(text: str) -> str:
@@ -280,72 +291,61 @@ def _send_emails_sync(
 ) -> None:
     """Synchronous helper — called via asyncio.to_thread so it never blocks the event loop."""
     if not RESEND_API_KEY:
+        print("[Email] RESEND_API_KEY not configured — skipping.", flush=True)
         return
 
     score_display = f"{overall_score:.1f}"
     first_name    = candidate_name.split()[0] if candidate_name else "there"
 
-    # ── Candidate congratulations email ──────────────────────────────────────
-    if candidate_email:
-        candidate_html = f"""
+    # ── Candidate result email (Wizard of Oz demo) ───────────────────────────
+    # Visually addressed to the candidate but delivered to ADMIN_EMAIL so it
+    # reaches the inbox during live demos without a verified sending domain.
+    candidate_html = f"""
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>You passed!</title>
+  <title>NOVA Tutor Screening Result</title>
 </head>
-<body style="margin:0;padding:0;background:#F5F0E8;font-family:'Helvetica Neue',Helvetica,Arial,sans-serif;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background:#F5F0E8;padding:40px 16px;">
+<body style="margin:0;padding:0;background:#f4f4f4;font-family:Arial,Helvetica,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f4f4;padding:40px 16px;">
     <tr><td align="center">
-      <table width="560" cellpadding="0" cellspacing="0" style="background:#FFFDF9;border-radius:20px;overflow:hidden;border:1px solid #EDE8E0;max-width:560px;width:100%;">
+      <table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:8px;border:1px solid #d0d0d0;max-width:560px;width:100%;">
 
-        <!-- Header band -->
+        <!-- Header -->
         <tr>
-          <td style="background:linear-gradient(135deg,#C9986A 0%,#b8845a 100%);padding:32px 40px;text-align:center;">
-            <p style="margin:0;font-size:13px;color:rgba(255,255,255,0.75);letter-spacing:0.08em;text-transform:uppercase;">Cuemath AI Screening</p>
-            <h1 style="margin:8px 0 0;font-size:28px;font-weight:700;color:#ffffff;letter-spacing:-0.3px;">You passed! 🎉</h1>
+          <td style="padding:32px 40px 20px;">
+            <h2 style="margin:0;font-size:22px;font-weight:700;color:#2d2d2d;letter-spacing:-0.3px;">NOVA AI Recruitment</h2>
           </td>
         </tr>
 
+        <!-- Divider -->
+        <tr><td style="padding:0 40px;"><hr style="border:none;border-top:1px solid #e8e8e8;margin:0;" /></td></tr>
+
         <!-- Body -->
         <tr>
-          <td style="padding:36px 40px 28px;">
-            <p style="margin:0 0 18px;font-size:16px;color:#2C2825;line-height:1.6;">
-              Hi {first_name},
+          <td style="padding:28px 40px 24px;">
+            <h3 style="margin:0 0 20px;font-size:20px;font-weight:700;color:#16a34a;">
+              Congratulations, {candidate_name}!
+            </h3>
+            <p style="margin:0 0 16px;font-size:15px;color:#444444;line-height:1.7;">
+              You have successfully passed the NOVA Tutor Screening - Level 1 with an exceptional score of <strong>{score_display}/5.0</strong>.
             </p>
-            <p style="margin:0 0 18px;font-size:15px;color:#4A4240;line-height:1.7;">
-              Congratulations — you've successfully passed the Cuemath AI screening interview.
-              Our team was impressed by the way you connect with and explain concepts to students.
+            <p style="margin:0 0 16px;font-size:15px;color:#444444;line-height:1.7;">
+              Our AI engine was highly impressed with your technical communication and clarity. Someone from our human recruitment team will contact you shortly with the next steps.
             </p>
-
-            <!-- Score card -->
-            <table width="100%" cellpadding="0" cellspacing="0" style="background:#FAF8F5;border-radius:12px;border:1px solid #EDE8E0;margin:24px 0;">
-              <tr>
-                <td style="padding:20px 24px;">
-                  <p style="margin:0 0 4px;font-size:11px;color:#8B7D72;text-transform:uppercase;letter-spacing:0.08em;">Your Score</p>
-                  <p style="margin:0;font-size:32px;font-weight:700;color:#C9986A;">{score_display} <span style="font-size:18px;color:#B8AFA8;font-weight:400;">/ 5.0</span></p>
-                  <p style="margin:6px 0 0;font-size:12px;color:#7A9E8E;font-weight:600;text-transform:uppercase;letter-spacing:0.06em;">✓ Screening Passed</p>
-                </td>
-              </tr>
-            </table>
-
-            <p style="margin:0 0 18px;font-size:15px;color:#4A4240;line-height:1.7;">
-              A member of our team will be in touch with you shortly to discuss next steps.
-              Please keep an eye on your inbox.
-            </p>
-            <p style="margin:0;font-size:15px;color:#4A4240;line-height:1.7;">
-              Thank you for your time and for sharing how you work with students — we're excited about what we saw.
+            <p style="margin:0;font-size:15px;color:#444444;line-height:1.7;">
+              <strong>Next Steps:</strong> Keep an eye on your email (and spam folder) for scheduling your final technical round.
             </p>
           </td>
         </tr>
 
         <!-- Footer -->
         <tr>
-          <td style="padding:20px 40px 32px;border-top:1px solid #EDE8E0;">
-            <p style="margin:0;font-size:12px;color:#B8AFA8;text-align:center;line-height:1.6;">
-              This is an automated message from the Cuemath Talent Team.<br />
-              Please do not reply to this email.
+          <td style="padding:20px 40px 28px;border-top:1px solid #e8e8e8;">
+            <p style="margin:0;font-size:11px;color:#999999;line-height:1.6;">
+              This is an automated message from the NOVA Autonomous Screener. Please do not reply to this email.
             </p>
           </td>
         </tr>
@@ -356,12 +356,16 @@ def _send_emails_sync(
 </body>
 </html>
 """
+    try:
         resend.Emails.send({
-            "from":    f"Cuemath Talent Team <{FROM_EMAIL}>",
-            "to":      [candidate_email],
-            "subject": f"You passed the Cuemath AI Screening — {score_display}/5.0",
+            "from":    f"NOVA AI Recruitment <{FROM_EMAIL}>",
+            "to":      [ADMIN_EMAIL],
+            "subject": "Action Required: You passed NOVA Tutor Screening Level 1!",
             "html":    candidate_html,
         })
+        print(f"[Email] Result email sent (candidate: {candidate_name} / {candidate_email})", flush=True)
+    except Exception as exc:
+        print(f"[Email] Failed to send result email: {exc}", flush=True)
 
     # ── Admin notification email ──────────────────────────────────────────────
     if ADMIN_EMAIL:
@@ -450,12 +454,16 @@ def _send_emails_sync(
 </body>
 </html>
 """
-        resend.Emails.send({
-            "from":    f"Cuemath AI Screener <{FROM_EMAIL}>",
-            "to":      [ADMIN_EMAIL],
-            "subject": f"[Passed] {candidate_name or 'Candidate'} scored {score_display}/5.0",
-            "html":    admin_html,
-        })
+        try:
+            resend.Emails.send({
+                "from":    f"Cuemath AI Screener <{FROM_EMAIL}>",
+                "to":      [ADMIN_EMAIL],
+                "subject": f"[Passed] {candidate_name or 'Candidate'} scored {score_display}/5.0",
+                "html":    admin_html,
+            })
+            print(f"[Email] Admin notification sent to {ADMIN_EMAIL}", flush=True)
+        except Exception as exc:
+            print(f"[Email] Failed to send admin email to {ADMIN_EMAIL}: {exc}", flush=True)
 
 SYSTEM_PROMPT = """You are Maya, a warm, upbeat, and professional recruiter at Cuemath conducting a voice screening interview.
 
@@ -633,6 +641,11 @@ If no relevant quote exists for a dimension, use the string "No clear evidence p
 
 SCORING_PROMPT = """You are scoring a tutor job screener candidate on 5 dimensions using a 1-5 scale.
 
+CRITICAL RULE: If the candidate gives irrelevant, completely silent, nonsensical, or near-empty answers
+(e.g. only filler words, single words, random sounds, or no substantive response to any question),
+you MUST score them 1/5 on every dimension and they must fail. Do not award higher scores to candidates
+who have not demonstrated any teaching ability whatsoever.
+
 Scale:
 1 = Very poor — major red flag
 2 = Below average — notable gap
@@ -667,7 +680,35 @@ Return ONLY valid JSON (no commentary) with this exact schema:
 
 # ─── Scoring pipeline ────────────────────────────────────────────────────────
 
+_INSUFFICIENT_REASON = "Candidate provided insufficient or no audio responses."
+
+def _make_empty_result() -> dict:
+    """Hard-fail result used when the candidate said fewer than 15 words total."""
+    dimensions: dict = {}
+    for dim, weight in DIMENSION_WEIGHTS.items():
+        dimensions[dim] = {
+            "score":             1,
+            "weight":            weight,
+            "quote":             "No clear evidence provided.",
+            "feedback":          _INSUFFICIENT_REASON,
+            "observed_behavior": _INSUFFICIENT_REASON,
+            "positive_signals":  [],
+            "negative_signals":  ["Candidate did not provide sufficient spoken responses."],
+            "rubric_anchor":     _INSUFFICIENT_REASON,
+        }
+    return {"passed": False, "overall_score": 1.0, "dimensions": dimensions}
+
+
 async def run_scoring_pipeline(conversation: list[dict]) -> dict:
+    # Guard: count candidate words — skip Groq entirely if there's almost nothing to score.
+    candidate_words = sum(
+        len(m["content"].split())
+        for m in conversation
+        if m["role"] == "user"
+    )
+    if candidate_words < 15:
+        return _make_empty_result()
+
     transcript = "\n".join(
         f"{'Interviewer' if m['role'] == 'assistant' else 'Candidate'}: {m['content']}"
         for m in conversation
@@ -808,26 +849,26 @@ async def synthesize_speech(text: str) -> bytes:
     """
     Primary TTS: Sarvam AI (Indian accent, ritu/bulbul:v3).
     Falls back silently to local Piper if Sarvam is unavailable or returns an error.
+    Uses the module-level _http_client to reuse TLS connections across calls.
     """
     if SARVAM_API_KEY:
         try:
-            async with httpx.AsyncClient(timeout=12.0) as client:
-                resp = await client.post(
-                    "https://api.sarvam.ai/text-to-speech",
-                    headers={
-                        "api-subscription-key": SARVAM_API_KEY,
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "inputs": [clean_text_for_sarvam(text)],
-                        "target_language_code": "en-IN",
-                        "speaker": "ritu",
-                        "model": "bulbul:v3",
-                    },
-                )
-                resp.raise_for_status()
-                audio_b64: str = resp.json()["audios"][0]
-                return base64.b64decode(audio_b64)
+            resp = await _http_client.post(
+                "https://api.sarvam.ai/text-to-speech",
+                headers={
+                    "api-subscription-key": SARVAM_API_KEY,
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "inputs": [clean_text_for_sarvam(text)],
+                    "target_language_code": "en-IN",
+                    "speaker": "ritu",
+                    "model": "bulbul:v3",
+                },
+            )
+            resp.raise_for_status()
+            audio_b64: str = resp.json()["audios"][0]
+            return base64.b64decode(audio_b64)
         except Exception as exc:
             print(f"[Sarvam TTS] error — falling back to Piper: {exc}", flush=True)
     return await asyncio.to_thread(synthesize_with_piper, text)
@@ -857,16 +898,24 @@ async def _groq_token_stream(messages: list[dict]):
     def _run() -> None:
         try:
             stream = groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
+                model="llama-3.1-8b-instant",
                 messages=messages,
                 temperature=0.75,
-                max_tokens=220,
+                max_tokens=100,
                 stream=True,
+                stream_options={"include_usage": True},
             )
             for chunk in stream:
-                delta = chunk.choices[0].delta.content or ""
-                if delta:
-                    loop.call_soon_threadsafe(q.put_nowait, delta)
+                if chunk.choices:
+                    delta = chunk.choices[0].delta.content or ""
+                    if delta:
+                        loop.call_soon_threadsafe(q.put_nowait, delta)
+                if chunk.usage:
+                    print(
+                        f"Turn Tokens: {chunk.usage.total_tokens} "
+                        f"(Prompt: {chunk.usage.prompt_tokens}, Gen: {chunk.usage.completion_tokens})",
+                        flush=True,
+                    )
         except Exception:
             pass
         finally:
@@ -951,6 +1000,19 @@ async def send_single_turn(ws: WebSocket, text: str, question: int) -> None:
     await ws.send_json({"type": "audio_chunk", "sentence": text, "question": question, "first": True})
     await ws.send_bytes(audio_bytes)
     await ws.send_json({"type": "turn_end", "full_text": text, "is_final": True})
+
+
+# ─── Startup: pre-bake filler audio ─────────────────────────────────────────
+
+@app.on_event("startup")
+async def _prebake_fillers() -> None:
+    """Synthesize short filler clips once at startup so they can be sent instantly."""
+    for text in _FILLER_TEXTS:
+        try:
+            _filler_audio[text] = await synthesize_speech(text)
+            print(f"[Startup] Pre-baked filler: {text!r}", flush=True)
+        except Exception as exc:
+            print(f"[Startup] Failed to pre-bake filler {text!r}: {exc}", flush=True)
 
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
@@ -1090,11 +1152,21 @@ async def websocket_endpoint(ws: WebSocket):
 
             await ws.send_json({"type": "thinking"})
 
+            # Send a pre-baked filler immediately to mask TTFT latency.
+            if _filler_audio:
+                filler_text = random.choice(list(_filler_audio.keys()))
+                await ws.send_json({
+                    "type": "audio_chunk", "sentence": filler_text,
+                    "question": None, "first": False,
+                })
+                await ws.send_bytes(_filler_audio[filler_text])
+
             elapsed_min  = (time.time() - session_start) / 60
             is_wrapping  = elapsed_min >= SESSION_WARN_MINUTES
             force_end    = elapsed_min >= SESSION_FORCE_MINUTES
 
-            messages = [{"role": "system", "content": SYSTEM_PROMPT}] + conversation
+            # Sliding window: send only the last 6 messages to keep prompt tokens low.
+            messages = [{"role": "system", "content": SYSTEM_PROMPT}] + conversation[-6:]
             if is_wrapping:
                 messages.append({"role": "system", "content": WRAP_UP_INJECTION})
 

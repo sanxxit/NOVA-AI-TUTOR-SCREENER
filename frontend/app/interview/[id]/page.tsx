@@ -331,10 +331,10 @@ export default function InterviewPage({ params }: { params: { id: string } }) {
   return (
     <main className="h-screen flex flex-col overflow-hidden relative bg-[#09090B]">
 
-      {/* ── Timer — fixed top-left ────────────────────────────────────────── */}
+      {/* ── Timer — fixed below global NOVA header ───────────────────────── */}
       {isInterviewActive && (
         <div
-          className="fixed top-5 left-6 z-30 flex items-center gap-2 px-3.5 py-2 rounded-lg"
+          className="fixed top-16 left-6 z-30 flex items-center gap-2 px-3.5 py-2 rounded-lg"
           style={{ background: 'rgba(255,255,255,0.07)', border: '1px solid rgba(255,255,255,0.12)', backdropFilter: 'blur(14px)' }}
         >
           <span
@@ -353,7 +353,7 @@ export default function InterviewPage({ params }: { params: { id: string } }) {
 
       {/* ── End Interview — fixed top-right ──────────────────────────────── */}
       {isInterviewActive && (
-        <div className="fixed top-5 right-6 z-30">
+        <div className="fixed top-16 right-6 z-30">
           <button
             onClick={handleEndInterview}
             className="flex items-center gap-2.5 px-5 py-2.5 rounded-lg text-sm font-semibold transition-all duration-200 hover:bg-red-500/20 hover:border-red-500/50 active:scale-[0.97]"
@@ -441,7 +441,7 @@ export default function InterviewPage({ params }: { params: { id: string } }) {
 
       {/* ── Active interview — 3-panel layout ────────────────────────────── */}
       {isInterviewActive && (
-        <div className="flex flex-col h-full pt-24">
+        <div className="flex flex-col h-full pt-28">
 
           {/* TOP: Current AI question — sits below fixed navbar/controls */}
           <div className="flex-shrink-0 text-center px-6 py-6">

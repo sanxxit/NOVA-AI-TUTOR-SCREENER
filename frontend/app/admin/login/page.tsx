@@ -54,7 +54,7 @@ export default function AdminLoginPage() {
             </svg>
           </div>
           <h1 className="text-xl font-bold text-white">Admin Access</h1>
-          <p className="text-zinc-600 text-xs">Nova Candidate Dashboard</p>
+          <p className="text-zinc-300 text-xs">Nova Candidate Dashboard</p>
         </div>
 
         <div className="h-px bg-white/[0.06]" />
@@ -62,7 +62,7 @@ export default function AdminLoginPage() {
         {/* Form */}
         <form onSubmit={handleSubmit} className="space-y-5">
           <div className="space-y-1.5">
-            <label className="text-[11px] font-medium text-zinc-600 uppercase tracking-wider">
+            <label className="text-[11px] font-medium text-zinc-300 uppercase tracking-wider">
               Password
             </label>
             <div className="relative">
@@ -73,13 +73,13 @@ export default function AdminLoginPage() {
                 placeholder="Enter admin password"
                 required
                 autoFocus
-                className="w-full bg-white/[0.04] border border-white/[0.10] rounded-lg px-4 py-3 text-sm text-white placeholder:text-zinc-700 focus:outline-none focus:border-violet-500/50 pr-11 transition-all duration-200"
+                className="w-full bg-white/[0.04] border border-white/[0.10] rounded-lg px-4 py-3 text-sm text-white placeholder:text-zinc-400 focus:outline-none focus:border-violet-500/50 pr-11 transition-all duration-200"
               />
               <button
                 type="button"
                 onClick={() => setShowPw(!showPw)}
                 tabIndex={-1}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-700 hover:text-zinc-400 transition-colors"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-400 transition-colors"
               >
                 {showPw ? (
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -119,7 +119,7 @@ export default function AdminLoginPage() {
           </button>
         </form>
 
-        <p className="text-center text-zinc-800 text-[11px]">Session expires after 2 hours.</p>
+        <p className="text-center text-zinc-500 text-[11px]">Session expires after 2 hours.</p>
       </div>
     </main>
   );

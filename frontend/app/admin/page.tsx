@@ -185,7 +185,7 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
       >
         <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 flex-shrink-0">
           <h3 className="text-sm font-semibold text-white">{title}</h3>
-          <button onClick={onClose} className="text-zinc-600 hover:text-white transition-colors">
+          <button onClick={onClose} className="text-zinc-300 hover:text-white transition-colors">
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -204,7 +204,7 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
 function ConversationView({ candidate }: { candidate: Candidate }) {
   const transcript = candidate.transcript ?? [];
   if (transcript.length === 0) {
-    return <p className="text-zinc-600 text-sm text-center py-10">No transcript available.</p>;
+    return <p className="text-zinc-300 text-sm text-center py-10">No transcript available.</p>;
   }
   return (
     <div className="space-y-3">
@@ -219,7 +219,7 @@ function ConversationView({ candidate }: { candidate: Candidate }) {
               {isAI ? 'N' : 'C'}
             </div>
             <div className={`max-w-[80%] space-y-0.5 ${isAI ? '' : 'items-end flex flex-col'}`}>
-              <span className="text-[10px] font-medium uppercase tracking-wide text-zinc-700">
+              <span className="text-[10px] font-medium uppercase tracking-wide text-zinc-400">
                 {isAI ? 'Nova' : 'Candidate'}
               </span>
               <div
@@ -244,7 +244,7 @@ function ConversationView({ candidate }: { candidate: Candidate }) {
 function ReasoningView({ candidate }: { candidate: Candidate }) {
   const scores = candidate.scores;
   if (!scores) {
-    return <p className="text-zinc-600 text-sm text-center py-10">No assessment data available.</p>;
+    return <p className="text-zinc-300 text-sm text-center py-10">No assessment data available.</p>;
   }
   const dims = scores.dimensions ?? {};
   return (
@@ -273,7 +273,7 @@ function ReasoningView({ candidate }: { candidate: Candidate }) {
       {/* Formula */}
       <div className="rounded-lg p-4 border border-zinc-800" style={{ background: 'rgba(255,255,255,0.02)' }}>
         <p className="text-xs font-semibold text-white mb-1">How the score is calculated</p>
-        <p className="text-xs text-zinc-600 leading-relaxed">
+        <p className="text-xs text-zinc-300 leading-relaxed">
           Nova evaluated 5 dimensions from the conversation. Each is scored 1–5 and weighted by importance. The final score is the weighted average. A score ≥ 3.0 results in a PASS.
         </p>
         <div className="mt-2 flex flex-wrap gap-1.5">
@@ -281,7 +281,7 @@ function ReasoningView({ candidate }: { candidate: Candidate }) {
             const dim = dims[key];
             if (!dim) return null;
             return (
-              <span key={key} className="text-[10px] px-2 py-0.5 rounded border border-zinc-800 text-zinc-600">
+              <span key={key} className="text-[10px] px-2 py-0.5 rounded border border-zinc-800 text-zinc-300">
                 {DIM_LABELS[key]} · {Math.round(dim.weight * 100)}%
               </span>
             );
@@ -291,7 +291,7 @@ function ReasoningView({ candidate }: { candidate: Candidate }) {
 
       {/* Per-dimension */}
       <div className="space-y-3">
-        <p className="text-[10px] font-semibold text-zinc-700 uppercase tracking-wider">Dimension-by-Dimension</p>
+        <p className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">Dimension-by-Dimension</p>
         {DIM_ORDER.map((key) => {
           const dim = dims[key];
           if (!dim) return null;
@@ -300,7 +300,7 @@ function ReasoningView({ candidate }: { candidate: Candidate }) {
               <div className="flex items-center justify-between gap-3 flex-wrap">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium text-white">{DIM_LABELS[key]}</span>
-                  <span className="text-[10px] text-zinc-700">({Math.round(dim.weight * 100)}%)</span>
+                  <span className="text-[10px] text-zinc-400">({Math.round(dim.weight * 100)}%)</span>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <div className="w-20 h-0.5 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
@@ -311,13 +311,13 @@ function ReasoningView({ candidate }: { candidate: Candidate }) {
               </div>
               {dim.quote && dim.quote !== 'No clear evidence provided.' && (
                 <div className="rounded-md px-3 py-2 border border-zinc-800/60" style={{ background: 'rgba(255,255,255,0.02)' }}>
-                  <p className="text-[10px] text-zinc-700 uppercase tracking-wide font-medium mb-1">Evidence</p>
+                  <p className="text-[10px] text-zinc-400 uppercase tracking-wide font-medium mb-1">Evidence</p>
                   <p className="text-xs text-zinc-500 italic leading-relaxed">"{dim.quote}"</p>
                 </div>
               )}
               {dim.feedback && (
                 <div>
-                  <p className="text-[10px] text-zinc-700 uppercase tracking-wide font-medium mb-1">Assessment</p>
+                  <p className="text-[10px] text-zinc-400 uppercase tracking-wide font-medium mb-1">Assessment</p>
                   <p className="text-xs text-zinc-500 leading-relaxed">{dim.feedback}</p>
                 </div>
               )}
@@ -336,7 +336,7 @@ function DimCard({ dimKey, dim }: { dimKey: string; dim: DimData }) {
     <div className="rounded-lg border border-zinc-900 p-4 space-y-3" style={{ background: '#000' }}>
       <div className="flex items-start justify-between gap-2">
         <span className="text-sm font-medium text-white leading-tight">{DIM_LABELS[dimKey] ?? dimKey}</span>
-        <span className="text-[10px] px-1.5 py-0.5 rounded flex-shrink-0" style={{ background: 'rgba(255,255,255,0.05)', color: '#52525B' }}>
+        <span className="text-[10px] px-1.5 py-0.5 rounded flex-shrink-0" style={{ background: 'rgba(255,255,255,0.05)', color: '#D4D4D8' }}>
           {Math.round(dim.weight * 100)}%
         </span>
       </div>
@@ -347,7 +347,7 @@ function DimCard({ dimKey, dim }: { dimKey: string; dim: DimData }) {
         <span className="text-xs font-bold tabular-nums" style={{ color: scoreColor(dim.score) }}>{dim.score} / 5</span>
       </div>
       {dim.observed_behavior && (
-        <p className="text-xs text-zinc-600 leading-relaxed">{dim.observed_behavior}</p>
+        <p className="text-xs text-zinc-300 leading-relaxed">{dim.observed_behavior}</p>
       )}
       {dim.positive_signals && dim.positive_signals.length > 0 && (
         <div className="space-y-1.5">
@@ -377,11 +377,11 @@ function DimCard({ dimKey, dim }: { dimKey: string; dim: DimData }) {
       )}
       {!dim.positive_signals && !dim.negative_signals && dim.quote && dim.quote !== 'No clear evidence provided.' && (
         <div className="rounded-md px-3 py-2 border border-zinc-900" style={{ background: 'rgba(255,255,255,0.02)' }}>
-          <p className="text-xs text-zinc-600 italic leading-relaxed">"{dim.quote}"</p>
+          <p className="text-xs text-zinc-300 italic leading-relaxed">"{dim.quote}"</p>
         </div>
       )}
       {dim.rubric_anchor && (
-        <p className="text-[10px] text-zinc-700 leading-relaxed border-t border-zinc-900 pt-2">{dim.rubric_anchor}</p>
+        <p className="text-[10px] text-zinc-400 leading-relaxed border-t border-zinc-900 pt-2">{dim.rubric_anchor}</p>
       )}
     </div>
   );
@@ -422,7 +422,7 @@ export default function AdminPage() {
   const toggle = (id: string) => setExpandedId(expandedId === id ? null : id);
 
   return (
-    <main className="min-h-screen bg-[#0A0A0A] px-6 py-10">
+    <main className="min-h-screen bg-[#0A0A0A] px-6 pt-20 pb-10">
       <div className="max-w-7xl mx-auto space-y-6">
 
         {/* Header */}
@@ -431,23 +431,23 @@ export default function AdminPage() {
             <div className="flex items-center gap-3 mb-3">
               <button
                 onClick={() => router.push('/')}
-                className="flex items-center gap-1 text-xs text-zinc-700 hover:text-zinc-400 transition-colors"
+                className="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-400 transition-colors"
               >
                 <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
                 </svg>
                 Home
               </button>
-              <span className="text-zinc-800">·</span>
+              <span className="text-zinc-500">·</span>
               <button
                 onClick={() => { sessionStorage.removeItem('admin_token'); router.replace('/admin/login'); }}
-                className="text-xs text-zinc-700 hover:text-zinc-400 transition-colors"
+                className="text-xs text-zinc-400 hover:text-zinc-400 transition-colors"
               >
                 Sign out
               </button>
             </div>
             <h1 className="text-3xl font-bold text-white">Candidate Dashboard</h1>
-            <p className="text-zinc-600 text-sm">
+            <p className="text-zinc-300 text-sm">
               {loading ? 'Loading…' : `${candidates.length} completed assessment${candidates.length !== 1 ? 's' : ''}`}
             </p>
           </div>
@@ -460,7 +460,7 @@ export default function AdminPage() {
                 { label: 'Avg Score', value: `${avgScore} / 5.0` },
               ].map(({ label, value }) => (
                 <div key={label} className="rounded-lg border border-zinc-800 px-4 py-3 text-center" style={{ background: 'rgba(255,255,255,0.02)' }}>
-                  <p className="text-[11px] text-zinc-600">{label}</p>
+                  <p className="text-[11px] text-zinc-300">{label}</p>
                   <p className="text-lg font-semibold text-white tabular-nums">{value}</p>
                 </div>
               ))}
@@ -484,7 +484,7 @@ export default function AdminPage() {
         {/* Filter bar */}
         {!loading && candidates.length > 0 && (
           <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs text-zinc-700 font-medium">Filter:</span>
+            <span className="text-xs text-zinc-400 font-medium">Filter:</span>
             {([
               { key: 'all',  label: `All (${candidates.length})` },
               { key: 'pass', label: `Selected (${passCount})` },
@@ -496,7 +496,7 @@ export default function AdminPage() {
                 className="text-xs px-3 py-1.5 rounded-md border transition-all duration-150 font-medium"
                 style={{
                   background:  filter === key ? 'rgba(139,92,246,0.15)' : 'transparent',
-                  color:       filter === key ? '#A78BFA' : '#52525B',
+                  color:       filter === key ? '#A78BFA' : '#D4D4D8',
                   borderColor: filter === key ? 'rgba(139,92,246,0.40)' : '#27272A',
                 }}
               >
@@ -510,7 +510,7 @@ export default function AdminPage() {
         {loading && (
           <div className="flex flex-col items-center gap-4 py-20">
             <div className="w-6 h-6 rounded-full border border-violet-500/40 border-t-violet-500 animate-spin" />
-            <p className="text-zinc-600 text-sm">Loading candidates…</p>
+            <p className="text-zinc-300 text-sm">Loading candidates…</p>
           </div>
         )}
 
@@ -518,7 +518,7 @@ export default function AdminPage() {
         {!loading && error && (
           <div className="rounded-lg border border-red-500/20 p-6 text-center space-y-2" style={{ background: 'rgba(239,68,68,0.05)' }}>
             <p className="text-sm text-red-400">{error}</p>
-            <button onClick={() => window.location.reload()} className="text-xs text-zinc-600 underline">Try again</button>
+            <button onClick={() => window.location.reload()} className="text-xs text-zinc-300 underline">Try again</button>
           </div>
         )}
 
@@ -526,13 +526,13 @@ export default function AdminPage() {
         {!loading && !error && candidates.length === 0 && (
           <div className="rounded-lg border border-zinc-800 p-14 text-center space-y-2" style={{ background: 'rgba(255,255,255,0.02)' }}>
             <p className="text-lg font-semibold text-white">No results yet.</p>
-            <p className="text-zinc-600 text-sm">Results will appear here once candidates complete their assessments.</p>
+            <p className="text-zinc-300 text-sm">Results will appear here once candidates complete their assessments.</p>
           </div>
         )}
 
         {!loading && !error && candidates.length > 0 && filtered.length === 0 && (
           <div className="rounded-lg border border-zinc-800 p-8 text-center">
-            <p className="text-zinc-600 text-sm">No candidates match this filter.</p>
+            <p className="text-zinc-300 text-sm">No candidates match this filter.</p>
           </div>
         )}
 
@@ -546,7 +546,7 @@ export default function AdminPage() {
                     {['Unique ID', 'Name', 'Email', 'Score', 'Result', 'Completed', 'Conversation', 'AI Reasoning', ''].map((h) => (
                       <th
                         key={h}
-                        className="py-3 px-4 text-left text-[11px] font-medium text-zinc-700 tracking-[0.07em] uppercase whitespace-nowrap"
+                        className="py-3 px-4 text-left text-[11px] font-medium text-zinc-400 tracking-[0.07em] uppercase whitespace-nowrap"
                       >
                         {h}
                       </th>
@@ -569,7 +569,7 @@ export default function AdminPage() {
                           <td className="py-4 px-4">
                             <span
                               title={c.candidate_id}
-                              className="font-mono text-[11px] text-zinc-600 px-2 py-1 rounded cursor-default select-all"
+                              className="font-mono text-[11px] text-zinc-300 px-2 py-1 rounded cursor-default select-all"
                               style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.07)' }}
                             >
                               {shortId(c.candidate_id)}
@@ -580,7 +580,7 @@ export default function AdminPage() {
                           <td className="py-4 px-4 font-medium text-white whitespace-nowrap">{c.name}</td>
 
                           {/* Email */}
-                          <td className="py-4 px-4 text-zinc-600 text-xs">{c.email}</td>
+                          <td className="py-4 px-4 text-zinc-300 text-xs">{c.email}</td>
 
                           {/* Score */}
                           <td className="py-4 px-4">
@@ -594,13 +594,13 @@ export default function AdminPage() {
                           <td className="py-4 px-4"><PassBadge passed={c.passed} /></td>
 
                           {/* Date */}
-                          <td className="py-4 px-4 text-zinc-700 text-xs whitespace-nowrap">{formatDate(c.completed_at)}</td>
+                          <td className="py-4 px-4 text-zinc-400 text-xs whitespace-nowrap">{formatDate(c.completed_at)}</td>
 
                           {/* Conversation */}
                           <td className="py-4 px-4">
                             <button
                               onClick={() => setConversationFor(c)}
-                              className="flex items-center gap-1.5 text-xs font-medium text-zinc-600 hover:text-violet-400 transition-colors duration-150 whitespace-nowrap"
+                              className="flex items-center gap-1.5 text-xs font-medium text-zinc-300 hover:text-violet-400 transition-colors duration-150 whitespace-nowrap"
                             >
                               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
@@ -613,7 +613,7 @@ export default function AdminPage() {
                           <td className="py-4 px-4">
                             <button
                               onClick={() => setReasoningFor(c)}
-                              className="flex items-center gap-1.5 text-xs font-medium text-zinc-600 hover:text-fuchsia-400 transition-colors duration-150 whitespace-nowrap"
+                              className="flex items-center gap-1.5 text-xs font-medium text-zinc-300 hover:text-fuchsia-400 transition-colors duration-150 whitespace-nowrap"
                             >
                               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
@@ -627,7 +627,7 @@ export default function AdminPage() {
                             <button
                               onClick={() => toggle(c.candidate_id)}
                               className="flex items-center gap-1.5 text-xs font-medium transition-colors duration-150 ml-auto whitespace-nowrap"
-                              style={{ color: isOpen ? '#A78BFA' : '#52525B' }}
+                              style={{ color: isOpen ? '#A78BFA' : '#D4D4D8' }}
                             >
                               {isOpen ? 'Close' : 'Dim Scores'}
                               <svg

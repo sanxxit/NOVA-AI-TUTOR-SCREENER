@@ -91,9 +91,9 @@ export default function ResultsPage({ params }: { params: { id: string } }) {
     return () => { cancelled = true; };
   }, [params.id, retries]);
 
-  // PDF auto-download on PASS
+  // PDF auto-download for every completed interview (PASS and FAIL)
   useEffect(() => {
-    if (!data?.passed) return;
+    if (!data) return;
     const run = async () => {
       const { jsPDF }       = await import('jspdf');
       const autoTableModule = await import('jspdf-autotable');
@@ -280,19 +280,17 @@ export default function ResultsPage({ params }: { params: { id: string } }) {
         {/* Context message */}
         <div className="rounded-xl px-5 py-4 bg-white/[0.03] border border-white/[0.07]">
           {passed ? (
-            <>
-              <p className="text-sm text-zinc-300 leading-relaxed">
-                You passed the screening. We'll reach out via email with next steps shortly.
-              </p>
-              <p className="text-xs text-zinc-600 mt-2">
-                A PDF copy of your results has been downloaded automatically.
-              </p>
-            </>
+            <p className="text-sm text-zinc-300 leading-relaxed">
+              You passed the screening. We'll reach out via email with next steps shortly.
+            </p>
           ) : (
             <p className="text-sm text-zinc-400 leading-relaxed">
               Thank you for completing the interview, {name.split(' ')[0]}. We appreciate your time and encourage you to apply again in the future.
             </p>
           )}
+          <p className="text-xs text-zinc-600 mt-2">
+            A PDF copy of your results has been downloaded automatically.
+          </p>
         </div>
 
         {/* Score breakdown */}
