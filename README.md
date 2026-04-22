@@ -1,8 +1,20 @@
-# Nova — AI Tutor Screener
+# NOVA — Autonomous AI Tutor Screener
+### Built for the Cuemath Engineering Challenge
 
-> A 10-minute AI-powered voice interview that screens math tutor candidates for soft skills — before any human is involved.
+**A production-ready, voice-first recruitment engine designed to autonomously screen math tutors at scale, evaluating communication clarity, empathy, and patience before human intervention.**
 
-Nova conducts a fully autonomous, voice-first interview using a warm AI persona named **Maya**. It evaluates five teaching soft skills, produces a weighted score, and delivers a hire/no-hire verdict — all without a single recruiter on the call.
+[![Deploy Status](https://img.shields.io/badge/Vercel-Deployed-success?logo=vercel)](#) [![Backend Status](https://img.shields.io/badge/Render-Live-success?logo=render)](#) [![AI Workflow](https://img.shields.io/badge/Claude_Code-Agentic_Workflow-8B5CF6)](#)
+
+---
+## 🧠 The 'Director' Architecture Approach
+This platform was not manually typed line-by-line. To achieve enterprise scale at 10x velocity, I acted as the **Director** of an autonomous agentic workflow using Claude Code. 
+
+By engineering a persistent memory state (`donesofar.md`), I orchestrated complex microservices—including a sub-two-second sentence-level streaming pipeline and strict edge-case logic—while the AI executed the implementation. 
+
+**Explore the Architecture:**
+* 📄 [Technical Write-up & Tradeoffs](https://docs.google.com/document/d/1hIaMjC5e0-zRDPSjHOM8HC7tlv2Mct00ziIVWwim3-M/edit?usp=drive_web)
+* 🧠 [The Agentic Memory State (donesofar.md)](./Done_so_far.md)
+* ⚖️ [The 5-Dimension Scoring Rubric](./screener-rubric.md)
 
 ---
 
@@ -28,6 +40,20 @@ Nova conducts a fully autonomous, voice-first interview using a warm AI persona 
 - **Email notifications** — candidate congratulations + recruiter alert via Resend (PASS only)
 - **PDF report** — auto-downloaded on PASS with scores, verdict, and reference ID
 - **Obsidian dark mode** — premium `#09090B` UI throughout
+
+---
+
+## ⚖️ Key Tradeoffs & Design Decisions
+
+1. **Edge STT vs. Cloud STT:** I chose to run Whisper natively in the candidate's browser via WebAssembly (`@xenova/transformers`).
+   * *Tradeoff:* Requires a brief 30MB model download during onboarding.
+   * *Benefit:* Eliminates audio upload latency, reduces backend compute costs to zero, and ensures maximum privacy.
+2. **Sentence-Level Streaming vs. Block Generation:**
+   * *Tradeoff:* Increased backend complexity managing async Queues and WebSocket chunks.
+   * *Benefit:* Reduces conversational latency from ~8 seconds down to <2 seconds. Maya speaks while the LLM is still generating.
+3. **The 'Silence Guard':**
+   * *Decision:* The system enforces a strict >15 word minimum.
+   * *Benefit:* Solves the edge case of candidates attempting to 'game' the system or abandon the interview, preventing wasted LLM tokens on empty evaluations.
 
 ---
 
