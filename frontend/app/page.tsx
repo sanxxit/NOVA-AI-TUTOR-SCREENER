@@ -193,10 +193,10 @@ export default function LandingPage() {
               className="flex items-center flex-shrink-0"
               style={{ animation: 'marquee 28s linear infinite', width: 'max-content' }}
             >
-              <span className="whitespace-nowrap text-[10px] font-semibold tracking-[0.22em] text-zinc-300 uppercase px-6">
+              <span className="whitespace-nowrap text-[10px] font-extrabold tracking-[0.22em] text-white uppercase px-6 drop-shadow-[0_0_10px_rgba(255,255,255,0.8)]">
                 {TICKER_TEXT}
               </span>
-              <span className="whitespace-nowrap text-[10px] font-semibold tracking-[0.22em] text-zinc-300 uppercase px-6" aria-hidden="true">
+              <span className="whitespace-nowrap text-[10px] font-extrabold tracking-[0.22em] text-white uppercase px-6 drop-shadow-[0_0_10px_rgba(255,255,255,0.8)]" aria-hidden="true">
                 {TICKER_TEXT}
               </span>
             </div>

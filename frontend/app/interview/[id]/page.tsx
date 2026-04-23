@@ -55,7 +55,9 @@ export default function InterviewPage({ params }: { params: { id: string } }) {
   const [transcript,     setTranscript]     = useState<{ role: 'user' | 'ai'; text: string }[]>([]);
   const [errorMsg,       setErrorMsg]       = useState('');
   const [elapsed,        setElapsed]        = useState(0);
-  const [activeAnalyser, setActiveAnalyser] = useState<AnalyserNode | null>(null);
+  const [activeAnalyser,  setActiveAnalyser]  = useState<AnalyserNode | null>(null);
+  const [showQuitConfirm, setShowQuitConfirm] = useState(false);
+  const [resumeCountdown, setResumeCountdown] = useState<number | null>(null);
 
   const stateRef             = useRef<InterviewState>('connecting');
   const wsRef                = useRef<WebSocket | null>(null);
@@ -74,6 +76,8 @@ export default function InterviewPage({ params }: { params: { id: string } }) {
   const isQueuePlayingRef    = useRef(false);
   const turnEndReceivedRef   = useRef(false);
   const transcriptEndRef     = useRef<HTMLDivElement | null>(null);
+  const countdownTimerRef    = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isPausedRef          = useRef(false);
 
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -156,6 +160,7 @@ export default function InterviewPage({ params }: { params: { id: string } }) {
     return () => {
       cancelled = true;
       if (timerRef.current) clearInterval(timerRef.current);
+      if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
       wsRef.current?.close();
       processorRef.current?.disconnect();
       audioCtxRef.current?.close();
@@ -251,17 +256,46 @@ export default function InterviewPage({ params }: { params: { id: string } }) {
     wsRef.current?.send(JSON.stringify({ type: 'start_interview' }));
   };
 
-  const handleEndInterview = () => {
-    if (!wsRef.current) return;
-    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+  const killAudio = () => {
     if (currentSourceRef.current) { try { currentSourceRef.current.stop(); } catch { /* stopped */ } currentSourceRef.current = null; }
-    speakAnalyserRef.current   = null;
-    audioQueueRef.current      = [];
-    isQueuePlayingRef.current  = false;
-    turnEndReceivedRef.current = false;
+    audioQueueRef.current     = [];
+    isQueuePlayingRef.current = false;
+    speakAnalyserRef.current  = null;
+    setActiveAnalyser(null);
+  };
+
+  const handleEndInterview = () => {
+    killAudio();
+    isPausedRef.current = true;
+    audioCtxRef.current?.suspend();
+    setShowQuitConfirm(true);
+  };
+
+  const confirmEndInterview = () => {
+    setShowQuitConfirm(false);
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    turnEndReceivedRef.current   = false;
     interviewCompleteRef.current = true;
     setIS('complete');
-    wsRef.current.send(JSON.stringify({ type: 'end_interview' }));
+    wsRef.current?.send(JSON.stringify({ type: 'end_interview' }));
+  };
+
+  const resumeInterview = () => {
+    setShowQuitConfirm(false);
+    let count = 3;
+    setResumeCountdown(count);
+    countdownTimerRef.current = setInterval(() => {
+      count--;
+      if (count <= 0) {
+        clearInterval(countdownTimerRef.current!);
+        countdownTimerRef.current = null;
+        setResumeCountdown(null);
+        isPausedRef.current = false;
+        audioCtxRef.current?.resume();
+      } else {
+        setResumeCountdown(count);
+      }
+    }, 1000);
   };
 
   const playChime = (ctx: AudioContext): Promise<void> =>
@@ -326,7 +360,11 @@ export default function InterviewPage({ params }: { params: { id: string } }) {
     if (turnEndReceivedRef.current) await finalizeTurn();
   };
 
-  const enqueueAudio = (buffer: ArrayBuffer) => { audioQueueRef.current.push(buffer); void drainQueue(); };
+  const enqueueAudio = (buffer: ArrayBuffer) => {
+    if (isPausedRef.current) return;
+    audioQueueRef.current.push(buffer);
+    void drainQueue();
+  };
 
   const isInterviewActive = ['listening', 'thinking', 'speaking'].includes(interviewState);
   const timerWarning      = elapsed >= 480;
@@ -534,6 +572,57 @@ export default function InterviewPage({ params }: { params: { id: string } }) {
             </div>
           </div>
 
+        </div>
+      )}
+
+      {/* ── Quit Confirmation Modal ───────────────────────────────────────── */}
+      {showQuitConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }}
+        >
+          <div
+            className="flex flex-col gap-6 p-8 rounded-2xl max-w-sm w-full mx-6 text-center"
+            style={{ background: '#111113', border: '1px solid rgba(255,255,255,0.10)' }}
+          >
+            <div className="space-y-2">
+              <p className="text-xl font-bold text-white">End interview?</p>
+              <p className="text-zinc-500 text-sm leading-relaxed">
+                Your responses will be scored and results shared with the team. This cannot be undone.
+              </p>
+            </div>
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={confirmEndInterview}
+                className="w-full py-3 rounded-xl text-sm font-semibold text-white transition-all duration-200 active:scale-[0.97]"
+                style={{ background: 'linear-gradient(135deg, #EF4444 0%, #DC2626 100%)', border: '1px solid rgba(239,68,68,0.4)' }}
+              >
+                Yes, end interview
+              </button>
+              <button
+                onClick={resumeInterview}
+                className="w-full py-3 rounded-xl text-sm font-semibold text-zinc-300 transition-all duration-200 hover:bg-white/5 active:scale-[0.97]"
+                style={{ border: '1px solid rgba(255,255,255,0.10)' }}
+              >
+                No, keep going
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Resume Countdown Overlay ──────────────────────────────────────── */}
+      {resumeCountdown !== null && (
+        <div
+          className="fixed inset-0 z-40 flex items-center justify-center pointer-events-none"
+          style={{ background: 'rgba(0,0,0,0.55)' }}
+        >
+          <span
+            className="text-9xl font-black text-white tabular-nums"
+            style={{ textShadow: '0 0 60px rgba(139,92,246,0.8)' }}
+          >
+            {resumeCountdown}
+          </span>
         </div>
       )}
 
