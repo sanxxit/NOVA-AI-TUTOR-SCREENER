@@ -903,19 +903,12 @@ async def _groq_token_stream(messages: list[dict]):
                 temperature=0.75,
                 max_tokens=100,
                 stream=True,
-                stream_options={"include_usage": True},
             )
             for chunk in stream:
                 if chunk.choices:
                     delta = chunk.choices[0].delta.content or ""
                     if delta:
                         loop.call_soon_threadsafe(q.put_nowait, delta)
-                if chunk.usage:
-                    print(
-                        f"Turn Tokens: {chunk.usage.total_tokens} "
-                        f"(Prompt: {chunk.usage.prompt_tokens}, Gen: {chunk.usage.completion_tokens})",
-                        flush=True,
-                    )
         except Exception:
             pass
         finally:
@@ -1117,36 +1110,54 @@ async def websocket_endpoint(ws: WebSocket):
     try:
         while True:
             raw = await ws.receive()
+            user_text: str | None = None
 
             if "bytes" in raw:
-                continue
-
-            msg = json.loads(raw["text"])
-
-            if msg.get("type") == "ping":
-                await ws.send_json({"type": "pong"})
-                continue
-
-            if msg.get("type") == "end_interview":
-                # Candidate clicked "End Interview" — score whatever conversation exists
-                scoring_task = asyncio.create_task(
-                    _score_and_persist(candidate_id, conversation, candidate_name, candidate_email)
-                )
+                # WebM/Opus audio blob from frontend VAD — transcribe via Groq Whisper
+                audio_bytes = raw["bytes"]
                 try:
-                    await ws.send_json({"type": "interview_complete"})
-                    results = await scoring_task
-                    await ws.send_json({"type": "interview_results", "data": results})
-                except Exception:
-                    if not scoring_task.done():
-                        await scoring_task
-                break
+                    result = await asyncio.to_thread(
+                        lambda: groq_client.audio.transcriptions.create(
+                            model="whisper-large-v3-turbo",
+                            file=("audio.webm", audio_bytes),
+                            response_format="text",
+                        )
+                    )
+                    user_text = (str(result) if result else "").strip()
+                except Exception as exc:
+                    print(f"[Whisper STT] error: {exc}", flush=True)
+                    continue
+                if not user_text or len(user_text) <= 1:
+                    await ws.send_json({"type": "ready_for_input"})
+                    continue
+                await ws.send_json({"type": "transcription", "text": user_text})
+            else:
+                msg = json.loads(raw["text"])
 
-            if msg.get("type") != "user_message":
-                continue
+                if msg.get("type") == "ping":
+                    await ws.send_json({"type": "pong"})
+                    continue
 
-            user_text = msg.get("text", "").strip()
-            if not user_text:
-                continue
+                if msg.get("type") == "end_interview":
+                    # Candidate clicked "End Interview" — score whatever conversation exists
+                    scoring_task = asyncio.create_task(
+                        _score_and_persist(candidate_id, conversation, candidate_name, candidate_email)
+                    )
+                    try:
+                        await ws.send_json({"type": "interview_complete"})
+                        results = await scoring_task
+                        await ws.send_json({"type": "interview_results", "data": results})
+                    except Exception:
+                        if not scoring_task.done():
+                            await scoring_task
+                    break
+
+                if msg.get("type") != "user_message":
+                    continue
+
+                user_text = msg.get("text", "").strip()
+                if not user_text:
+                    continue
 
             conversation.append({"role": "user", "content": user_text})
 

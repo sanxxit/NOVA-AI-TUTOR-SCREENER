@@ -9,7 +9,7 @@ type InterviewState = 'connecting' | 'ready' | 'listening' | 'thinking' | 'speak
 const WS_URL             = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
 const SILENCE_THRESHOLD  = 0.012;
 const BUFFER_SIZE        = 4096;
-const SILENCE_DURATION_S = 0.8;
+const SILENCE_DURATION_S = 0.55;
 const MIN_SPEECH_CHUNKS  = 4;
 const MAX_SECONDS        = 600;
 
@@ -18,22 +18,6 @@ function formatTime(s: number): string {
   return `${Math.floor(capped / 60)}:${(capped % 60).toString().padStart(2, '0')}`;
 }
 
-async function resampleTo16k(chunks: Float32Array[], srcSampleRate: number): Promise<Float32Array> {
-  const totalLen  = chunks.reduce((s, c) => s + c.length, 0);
-  const combined  = new Float32Array(totalLen);
-  let offset = 0;
-  for (const c of chunks) { combined.set(c, offset); offset += c.length; }
-  const targetLen  = Math.ceil(totalLen * 16000 / srcSampleRate);
-  const offlineCtx = new OfflineAudioContext(1, targetLen, 16000);
-  const audioBuf   = offlineCtx.createBuffer(1, totalLen, srcSampleRate);
-  audioBuf.getChannelData(0).set(combined);
-  const src = offlineCtx.createBufferSource();
-  src.buffer = audioBuf;
-  src.connect(offlineCtx.destination);
-  src.start();
-  const rendered = await offlineCtx.startRendering();
-  return rendered.getChannelData(0);
-}
 
 const STATE_TO_WAVE: Record<string, WaveState> = {
   connecting: 'idle', ready: 'idle', listening: 'listening',
@@ -79,8 +63,8 @@ export default function InterviewPage({ params }: { params: { id: string } }) {
   const micAnalyserRef       = useRef<AnalyserNode | null>(null);
   const speakAnalyserRef     = useRef<AnalyserNode | null>(null);
   const processorRef         = useRef<ScriptProcessorNode | null>(null);
-  const whisperRef           = useRef<any>(null);
-  const recordingChunks      = useRef<Float32Array[]>([]);
+  const mediaRecorderRef     = useRef<MediaRecorder | null>(null);
+  const shouldSendAudioRef   = useRef(false);
   const isRecording          = useRef(false);
   const silenceCount         = useRef(0);
   const interviewCompleteRef = useRef(false);
@@ -119,11 +103,6 @@ export default function InterviewPage({ params }: { params: { id: string } }) {
     }
 
     const boot = async () => {
-      const { pipeline, env } = await import('@xenova/transformers');
-      env.allowLocalModels = false;
-      whisperRef.current = await pipeline('automatic-speech-recognition', 'Xenova/whisper-base.en');
-      if (cancelled) return;
-
       const ws = new WebSocket(WS_URL);
       ws.binaryType = 'arraybuffer';
       wsRef.current  = ws;
@@ -153,6 +132,12 @@ export default function InterviewPage({ params }: { params: { id: string } }) {
             if (audioCtxRef.current) await playChime(audioCtxRef.current);
             wsRef.current?.close();
             router.push(`/results/${params.id}`);
+            break;
+          case 'transcription':
+            setTranscript((t) => [...t, { role: 'user', text: msg.text }]);
+            break;
+          case 'ready_for_input':
+            setIS('listening');
             break;
           case 'error':
             setErrorMsg(msg.message || 'Something went wrong. Please refresh.');
@@ -199,31 +184,60 @@ export default function InterviewPage({ params }: { params: { id: string } }) {
     processor.connect(silentGain);
     silentGain.connect(ctx.destination);
 
+    // MediaRecorder captures WebM/Opus for cloud STT — ScriptProcessor handles VAD only.
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ? 'audio/webm;codecs=opus'
+      : 'audio/webm';
+    const mediaRecorder = new MediaRecorder(stream, { mimeType });
+    mediaRecorderRef.current = mediaRecorder;
+
+    mediaRecorder.ondataavailable = (e) => {
+      if (shouldSendAudioRef.current && e.data.size > 0 && wsRef.current?.readyState === WebSocket.OPEN) {
+        e.data.arrayBuffer().then((buf) => wsRef.current?.send(buf));
+      }
+      shouldSendAudioRef.current = false;
+    };
+
     const silenceFramesNeeded = Math.ceil((SILENCE_DURATION_S * ctx.sampleRate) / BUFFER_SIZE);
-    const maxRecordChunks     = Math.floor((45 * ctx.sampleRate) / BUFFER_SIZE);
+    const maxSpeechChunks     = Math.floor((45 * ctx.sampleRate) / BUFFER_SIZE);
+    let speechChunkCount = 0;
 
     processor.onaudioprocess = (e) => {
-      if (stateRef.current !== 'listening') { isRecording.current = false; silenceCount.current = 0; return; }
+      if (stateRef.current !== 'listening') {
+        if (mediaRecorder.state === 'recording') mediaRecorder.stop();
+        isRecording.current = false; silenceCount.current = 0; speechChunkCount = 0;
+        return;
+      }
       const samples = new Float32Array(e.inputBuffer.getChannelData(0));
       const rms     = Math.sqrt(samples.reduce((s, v) => s + v * v, 0) / samples.length);
       if (rms > SILENCE_THRESHOLD) {
         silenceCount.current = 0;
-        if (!isRecording.current) { isRecording.current = true; recordingChunks.current = []; }
-        recordingChunks.current.push(samples.slice());
+        if (!isRecording.current) {
+          isRecording.current = true;
+          speechChunkCount = 0;
+          if (mediaRecorder.state === 'inactive') mediaRecorder.start();
+        }
+        speechChunkCount++;
       } else if (isRecording.current) {
-        recordingChunks.current.push(samples.slice());
         silenceCount.current++;
         if (silenceCount.current >= silenceFramesNeeded) {
-          const chunks = recordingChunks.current.slice();
-          isRecording.current = false; recordingChunks.current = []; silenceCount.current = 0;
-          if (chunks.length >= MIN_SPEECH_CHUNKS) { setIS('thinking'); transcribeAndSend(chunks, ctx.sampleRate); }
+          isRecording.current = false; silenceCount.current = 0;
+          if (speechChunkCount >= MIN_SPEECH_CHUNKS) {
+            speechChunkCount = 0;
+            setIS('thinking');
+            shouldSendAudioRef.current = true;
+          } else {
+            speechChunkCount = 0;
+          }
+          if (mediaRecorder.state === 'recording') mediaRecorder.stop();
           return;
         }
       }
-      if (isRecording.current && recordingChunks.current.length >= maxRecordChunks) {
-        const chunks = recordingChunks.current.slice();
-        isRecording.current = false; recordingChunks.current = []; silenceCount.current = 0;
-        setIS('thinking'); transcribeAndSend(chunks, ctx.sampleRate);
+      if (isRecording.current && speechChunkCount >= maxSpeechChunks) {
+        isRecording.current = false; silenceCount.current = 0; speechChunkCount = 0;
+        setIS('thinking');
+        shouldSendAudioRef.current = true;
+        if (mediaRecorder.state === 'recording') mediaRecorder.stop();
       }
     };
   };
@@ -248,16 +262,6 @@ export default function InterviewPage({ params }: { params: { id: string } }) {
     interviewCompleteRef.current = true;
     setIS('complete');
     wsRef.current.send(JSON.stringify({ type: 'end_interview' }));
-  };
-
-  const transcribeAndSend = async (chunks: Float32Array[], sampleRate: number) => {
-    try {
-      const resampled = await resampleTo16k(chunks, sampleRate);
-      const result    = await whisperRef.current(resampled, { sampling_rate: 16000, chunk_length_s: 30, stride_length_s: 5 });
-      const text = (result?.text || '').trim().replace(/^[\s,.'"`]+/, '');
-      if (text.length > 1) { setTranscript((t) => [...t, { role: 'user', text }]); wsRef.current?.send(JSON.stringify({ type: 'user_message', text })); }
-      else setIS('listening');
-    } catch { setIS('listening'); }
   };
 
   const playChime = (ctx: AudioContext): Promise<void> =>
@@ -311,7 +315,7 @@ export default function InterviewPage({ params }: { params: { id: string } }) {
     const ctx = audioCtxRef.current;
     if (ctx) await playChime(ctx);
     if (interviewCompleteRef.current) { setIS('complete'); }
-    else { setIS('listening'); recordingChunks.current = []; isRecording.current = false; silenceCount.current = 0; }
+    else { setIS('listening'); isRecording.current = false; silenceCount.current = 0; }
   };
 
   const drainQueue = async () => {

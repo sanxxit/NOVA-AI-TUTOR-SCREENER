@@ -5,6 +5,9 @@ import { useState, FormEvent, useRef, useEffect, useCallback } from 'react';
 import { useTheme } from 'next-themes';
 import ThemeToggle from '@/components/ThemeToggle';
 
+const TICKER_SEP = ' '.repeat(15) + '◆' + ' '.repeat(15);
+const TICKER_TEXT = `HIRING MATH TUTOR${TICKER_SEP}BEST VOICE INTERVIEW PLATFORM${TICKER_SEP}`;
+
 const SKILLS = [
   { name: 'Empathy',               desc: 'Feeling what a stuck student feels.' },
   { name: 'Communication Clarity', desc: 'Simplifying, not lecturing.' },
@@ -166,7 +169,8 @@ export default function LandingPage() {
           <ThemeToggle />
           <button
             onClick={focusForm}
-            className="text-xs font-medium text-slate-500 dark:text-zinc-400 border border-slate-300 dark:border-white/[0.12] rounded-full px-4 py-1.5 hover:border-slate-400 dark:hover:border-white/30 hover:text-slate-900 dark:hover:text-white transition-all duration-200"
+            className="text-sm font-bold text-white rounded-full px-6 py-2.5 transition-all duration-200 hover:scale-105 hover:shadow-[0_0_22px_rgba(139,92,246,0.50)] active:scale-[0.97]"
+            style={{ background: 'linear-gradient(135deg, #7C3AED 0%, #A855F7 50%, #EC4899 100%)' }}
           >
             Start Interview
           </button>
@@ -174,6 +178,30 @@ export default function LandingPage() {
       </nav>
 
       <main className="pt-14">
+
+        {/* ── Floating Ticker ──────────────────────────────────────────────────── */}
+        <div className="max-w-4xl mx-auto px-6 pt-3 pb-1">
+          <div
+            className="rounded-full overflow-hidden h-8 flex items-center"
+            style={{
+              background: 'rgba(12,12,15,0.94)',
+              border: '1px solid rgba(255,255,255,0.09)',
+              backdropFilter: 'blur(12px)',
+            }}
+          >
+            <div
+              className="flex items-center flex-shrink-0"
+              style={{ animation: 'marquee 28s linear infinite', width: 'max-content' }}
+            >
+              <span className="whitespace-nowrap text-[10px] font-semibold tracking-[0.22em] text-zinc-300 uppercase px-6">
+                {TICKER_TEXT}
+              </span>
+              <span className="whitespace-nowrap text-[10px] font-semibold tracking-[0.22em] text-zinc-300 uppercase px-6" aria-hidden="true">
+                {TICKER_TEXT}
+              </span>
+            </div>
+          </div>
+        </div>
 
         {/* ── Hero ────────────────────────────────────────────────────────────── */}
         <section className="max-w-5xl mx-auto px-6 pt-24 pb-24">
@@ -233,7 +261,7 @@ export default function LandingPage() {
 
                 <div className="space-y-0.5">
                   <p className="text-base font-semibold text-slate-900 dark:text-white">Start your interview</p>
-                  <p className="text-xs text-slate-400 dark:text-zinc-300">Under 15 minutes. Voice only.</p>
+                  <p className="text-xs text-slate-400 dark:text-zinc-300">Under 10 minutes. Voice only.</p>
                 </div>
 
                 {/* ── Mic test button (idle) ──────────────────────────────────── */}
