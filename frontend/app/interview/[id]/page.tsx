@@ -258,9 +258,10 @@ export default function InterviewPage({ params }: { params: { id: string } }) {
 
   const killAudio = () => {
     if (currentSourceRef.current) { try { currentSourceRef.current.stop(); } catch { /* stopped */ } currentSourceRef.current = null; }
-    audioQueueRef.current     = [];
-    isQueuePlayingRef.current = false;
-    speakAnalyserRef.current  = null;
+    audioQueueRef.current      = [];
+    isQueuePlayingRef.current  = false;
+    turnEndReceivedRef.current = false;  // prevent stale finalizeTurn when drainQueue unblocks
+    speakAnalyserRef.current   = null;
     setActiveAnalyser(null);
   };
 
@@ -291,7 +292,15 @@ export default function InterviewPage({ params }: { params: { id: string } }) {
         countdownTimerRef.current = null;
         setResumeCountdown(null);
         isPausedRef.current = false;
-        audioCtxRef.current?.resume();
+        // Await the context resume before setting state or triggering the backend,
+        // so the audio pipeline is fully running before new chunks are decoded.
+        (audioCtxRef.current?.resume() ?? Promise.resolve()).then(() => {
+          setIS('thinking');
+          wsRef.current?.send(JSON.stringify({
+            type: 'user_message',
+            text: '(System Note: The candidate paused the interview briefly but has now resumed. Please continue naturally from where you left off.)',
+          }));
+        });
       } else {
         setResumeCountdown(count);
       }
