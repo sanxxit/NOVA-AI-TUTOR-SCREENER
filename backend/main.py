@@ -1122,7 +1122,9 @@ async def websocket_endpoint(ws: WebSocket):
             if "bytes" in raw:
                 # WebM/Opus audio blob from frontend VAD — transcribe via Groq Whisper
                 audio_bytes = raw["bytes"]
+                print(f"DEBUG: Received binary audio message of size {len(audio_bytes)} bytes", flush=True)
                 try:
+                    print("DEBUG: Sending audio to Groq Whisper...", flush=True)
                     result = await asyncio.wait_for(
                         asyncio.to_thread(
                             lambda: groq_client.audio.transcriptions.create(
@@ -1134,7 +1136,9 @@ async def websocket_endpoint(ws: WebSocket):
                         timeout=30.0,
                     )
                     user_text = (str(result) if result else "").strip()
+                    print(f"DEBUG: Groq STT returned text: {user_text}", flush=True)
                 except Exception as exc:
+                    print(f"DEBUG: STT Exception caught: {exc}", flush=True)
                     print(f"[Whisper STT] error: {exc}", flush=True)
                     try:
                         await ws.send_json({"type": "ready_for_input"})
