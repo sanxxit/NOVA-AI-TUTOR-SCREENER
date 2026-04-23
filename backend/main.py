@@ -970,19 +970,26 @@ async def stream_ai_response(
 
     # Flush any trailing text (e.g. final sentence with no punctuation)
     if sentence_buf.strip():
-        await _flush(sentence_buf)
+        try:
+            await _flush(sentence_buf)
+        except Exception:
+            pass
 
     full_text_clean = full_text.replace("[INTERVIEW_COMPLETE]", "").strip()
 
     # Fallback if Groq returned nothing at all
     if not full_text_clean:
         full_text_clean = "I'm sorry, I had a small hiccup there. Could you say that again?"
-        audio_bytes = await synthesize_speech(full_text_clean)
-        await ws.send_json({"type": "audio_chunk", "sentence": full_text_clean,
-                            "question": question_num, "first": True})
-        await ws.send_bytes(audio_bytes)
+        try:
+            audio_bytes = await synthesize_speech(full_text_clean)
+            await ws.send_json({"type": "audio_chunk", "sentence": full_text_clean,
+                                "question": question_num, "first": True})
+            await ws.send_bytes(audio_bytes)
+        except Exception:
+            pass
 
     is_complete = "[INTERVIEW_COMPLETE]" in full_text
+    # turn_end is the critical unblocking signal — send it even if TTS failed above.
     await ws.send_json({"type": "turn_end", "full_text": full_text_clean, "is_final": True})
     return full_text_clean, is_complete
 
@@ -1116,22 +1123,29 @@ async def websocket_endpoint(ws: WebSocket):
                 # WebM/Opus audio blob from frontend VAD — transcribe via Groq Whisper
                 audio_bytes = raw["bytes"]
                 try:
-                    result = await asyncio.to_thread(
-                        lambda: groq_client.audio.transcriptions.create(
-                            model="whisper-large-v3-turbo",
-                            file=("audio.webm", audio_bytes),
-                            response_format="text",
-                        )
+                    result = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            lambda: groq_client.audio.transcriptions.create(
+                                model="whisper-large-v3-turbo",
+                                file=("audio.webm", audio_bytes),
+                                response_format="text",
+                            )
+                        ),
+                        timeout=30.0,
                     )
                     user_text = (str(result) if result else "").strip()
                 except Exception as exc:
                     print(f"[Whisper STT] error: {exc}", flush=True)
+                    try:
+                        await ws.send_json({"type": "ready_for_input"})
+                    except Exception:
+                        pass
                     continue
                 if not user_text or len(user_text) <= 1:
                     await ws.send_json({"type": "ready_for_input"})
                     continue
                 await ws.send_json({"type": "transcription", "text": user_text})
-            else:
+            elif "text" in raw:
                 msg = json.loads(raw["text"])
 
                 if msg.get("type") == "ping":
@@ -1158,6 +1172,9 @@ async def websocket_endpoint(ws: WebSocket):
                 user_text = msg.get("text", "").strip()
                 if not user_text:
                     continue
+
+            else:
+                continue  # disconnect frame or unknown message type — skip safely
 
             conversation.append({"role": "user", "content": user_text})
 

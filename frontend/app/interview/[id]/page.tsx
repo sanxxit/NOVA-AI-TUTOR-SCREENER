@@ -78,6 +78,7 @@ export default function InterviewPage({ params }: { params: { id: string } }) {
   const transcriptEndRef     = useRef<HTMLDivElement | null>(null);
   const countdownTimerRef    = useRef<ReturnType<typeof setInterval> | null>(null);
   const isPausedRef          = useRef(false);
+  const heartbeatRef         = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -89,8 +90,23 @@ export default function InterviewPage({ params }: { params: { id: string } }) {
     if (s === 'complete' || s === 'error' || s === 'already_completed') {
       if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     }
-    if (s === 'listening') setActiveAnalyser(micAnalyserRef.current);
-    else if (s !== 'speaking') setActiveAnalyser(null);
+    if (s === 'listening') {
+      setActiveAnalyser(micAnalyserRef.current);
+      // Keep the WebSocket alive through Render's proxy idle-timeout by sending a
+      // ping every 20 s. Without this the proxy drops the connection after ~30–60 s
+      // of silence, the browser never notices (no onclose handling), and the next
+      // audio send silently fails — leaving the UI permanently stuck in 'thinking'.
+      if (!heartbeatRef.current) {
+        heartbeatRef.current = setInterval(() => {
+          if (wsRef.current?.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({ type: 'ping' }));
+          }
+        }, 20_000);
+      }
+    } else {
+      if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null; }
+      if (s !== 'speaking') setActiveAnalyser(null);
+    }
   }, []);
 
   useEffect(() => {
@@ -153,6 +169,13 @@ export default function InterviewPage({ params }: { params: { id: string } }) {
       ws.onerror = () => {
         if (!cancelled) { setErrorMsg('Connection lost. Please refresh to reconnect.'); setIS('error'); }
       };
+
+      ws.onclose = () => {
+        if (!cancelled && stateRef.current !== 'complete' && stateRef.current !== 'already_completed') {
+          setErrorMsg('Connection lost. Please refresh to reconnect.');
+          setIS('error');
+        }
+      };
     };
 
     boot().catch(() => { if (!cancelled) { setErrorMsg('Failed to initialize. Please refresh.'); setIS('error'); } });
@@ -161,6 +184,7 @@ export default function InterviewPage({ params }: { params: { id: string } }) {
       cancelled = true;
       if (timerRef.current) clearInterval(timerRef.current);
       if (countdownTimerRef.current) clearInterval(countdownTimerRef.current);
+      if (heartbeatRef.current) clearInterval(heartbeatRef.current);
       wsRef.current?.close();
       processorRef.current?.disconnect();
       audioCtxRef.current?.close();
@@ -364,9 +388,12 @@ export default function InterviewPage({ params }: { params: { id: string } }) {
   const drainQueue = async () => {
     if (isQueuePlayingRef.current) return;
     isQueuePlayingRef.current = true;
-    while (audioQueueRef.current.length > 0) { await playChunk(audioQueueRef.current.shift()!); }
-    isQueuePlayingRef.current = false;
-    if (turnEndReceivedRef.current) await finalizeTurn();
+    try {
+      while (audioQueueRef.current.length > 0) { await playChunk(audioQueueRef.current.shift()!); }
+    } finally {
+      isQueuePlayingRef.current = false;
+      if (turnEndReceivedRef.current) await finalizeTurn();
+    }
   };
 
   const enqueueAudio = (buffer: ArrayBuffer) => {
