@@ -18,6 +18,46 @@ const SKILLS = [
 
 type MicState = 'idle' | 'requesting' | 'listening' | 'detected' | 'denied';
 
+function validateEmail(email: string): string | null {
+  if (email.length > 254) return 'Email must be 254 characters or fewer.';
+  if (/\s/.test(email))   return 'Email must not contain spaces.';
+
+  const atMatches = email.match(/@/g);
+  if (!atMatches)              return 'Email must contain "@".';
+  if (atMatches.length > 1)    return 'Email must contain exactly one "@".';
+
+  const [localPart, domain] = email.split('@');
+
+  // ── Local part ──────────────────────────────────────────────────────────────
+  if (!localPart)                          return 'Email local part (before @) must not be empty.';
+  if (localPart.length > 64)               return 'Email local part must be 64 characters or fewer.';
+  if (!/^[A-Za-z0-9._%+\-]+$/.test(localPart)) return 'Email contains invalid characters before "@".';
+  if (localPart.startsWith('.'))           return 'Local part must not start with ".".';
+  if (localPart.endsWith('.'))             return 'Local part must not end with ".".';
+  if (localPart.includes('..'))            return 'Local part must not contain consecutive dots.';
+
+  // ── Domain ───────────────────────────────────────────────────────────────────
+  if (!domain)                    return 'Email domain (after @) must not be empty.';
+  if (domain.length > 255)        return 'Email domain must be 255 characters or fewer.';
+  if (!domain.includes('.'))      return 'Email domain must contain at least one ".".';
+  if (domain.includes('..'))      return 'Email domain must not contain consecutive dots.';
+
+  const labels = domain.split('.');
+  for (const label of labels) {
+    if (!label)                         return 'Email domain must not have empty labels.';
+    if (!/^[A-Za-z0-9-]+$/.test(label)) return 'Email domain contains invalid characters.';
+    if (label.startsWith('-'))          return 'Domain labels must not start with "-".';
+    if (label.endsWith('-'))            return 'Domain labels must not end with "-".';
+  }
+
+  // ── TLD ──────────────────────────────────────────────────────────────────────
+  const tld = labels[labels.length - 1];
+  if (!/^[A-Za-z]+$/.test(tld)) return 'TLD must contain only letters (e.g. .com, .in).';
+  if (tld.length < 2)            return 'TLD must be at least 2 characters.';
+
+  return null;
+}
+
 export default function LandingPage() {
   const router       = useRouter();
   const nameInputRef = useRef<HTMLInputElement>(null);
@@ -126,8 +166,9 @@ export default function LandingPage() {
       nameInputRef.current?.focus();
       return;
     }
-    if (!trimmedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
-      setError('Please enter a valid email address.');
+    const emailError = validateEmail(trimmedEmail);
+    if (emailError) {
+      setError(emailError);
       return;
     }
     stopMic();
@@ -382,7 +423,18 @@ export default function LandingPage() {
                           type="email"
                           autoComplete="email"
                           value={email}
-                          onChange={(e) => { setEmail(e.target.value); setError(''); }}
+                          onChange={(e) => {
+                            // Strip spaces — they are never valid in an email address
+                            setEmail(e.target.value.replace(/\s/g, ''));
+                            setError('');
+                          }}
+                          onBlur={(e) => {
+                            const val = e.target.value.trim();
+                            if (val) {
+                              const err = validateEmail(val);
+                              if (err) setError(err);
+                            }
+                          }}
                           placeholder="you@email.com"
                           className="w-full bg-white dark:bg-white/[0.04] border border-slate-200 dark:border-white/[0.10] rounded-lg px-4 py-3 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-none focus:border-violet-400 dark:focus:border-violet-500/50 focus:bg-white dark:focus:bg-white/[0.07] transition-all duration-200"
                         />

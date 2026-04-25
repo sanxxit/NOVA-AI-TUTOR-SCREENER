@@ -60,7 +60,23 @@ _http_client = httpx.AsyncClient(
 )
 
 # Pre-baked filler audio bytes, populated at startup by _prebake_fillers().
-_FILLER_TEXTS = ["Hmm.", "Interesting.", "I see."]
+_FILLER_TEXTS = [
+    "Hmm.",
+    "Okay.",
+    "Right.",
+    "Alright.",
+    "Sure.",
+    "Mm.",
+    "I see.",
+    "Got it.",
+    "Okay, let me think.",
+    "Right, one moment.",
+    "Let me think about that.",
+    "Alright, give me a second.",
+    "One moment.",
+    "Let me consider that.",
+    "Sure, let me think.",
+]
 _filler_audio: dict[str, bytes] = {}
 
 
@@ -923,10 +939,34 @@ async def _groq_token_stream(messages: list[dict]):
         yield token
 
 
+async def _send_filler_loop(ws: WebSocket, used: list[str]) -> None:
+    """Send filler audio every ~2.5 s until cancelled, avoiding recent repeats."""
+    available = list(_filler_audio.keys())
+    if not available:
+        return
+    try:
+        await asyncio.sleep(2.5)
+        while True:
+            choices = [f for f in available if f not in used[-3:]] or available
+            filler_text = random.choice(choices)
+            used.append(filler_text)
+            if len(used) > 6:
+                used.pop(0)
+            await ws.send_json({
+                "type": "audio_chunk", "sentence": filler_text,
+                "question": None, "first": False,
+            })
+            await ws.send_bytes(_filler_audio[filler_text])
+            await asyncio.sleep(2.5)
+    except asyncio.CancelledError:
+        pass
+
+
 async def stream_ai_response(
     ws: WebSocket,
     messages: list[dict],
     question_num: int,
+    filler_task: asyncio.Task | None = None,
 ) -> tuple[str, bool]:
     """
     Stream Groq tokens → detect sentence boundaries → synthesize each sentence
@@ -936,15 +976,24 @@ async def stream_ai_response(
 
     Returns (clean_full_text, is_complete).
     """
-    sentence_buf = ""
-    full_text    = ""
-    is_first     = True
+    sentence_buf    = ""
+    full_text       = ""
+    is_first        = True
+    _filler_stopped = False
 
     async def _flush(sentence: str) -> None:
-        nonlocal is_first
+        nonlocal is_first, _filler_stopped
         clean = sentence.replace("[INTERVIEW_COMPLETE]", "").strip()
         if not clean:
             return
+        # Stop filler loop before sending first real audio to prevent interleaving
+        if is_first and filler_task is not None and not filler_task.done() and not _filler_stopped:
+            _filler_stopped = True
+            filler_task.cancel()
+            try:
+                await filler_task
+            except asyncio.CancelledError:
+                pass
         audio_bytes = await synthesize_speech(clean)
         await ws.send_json({
             "type":     "audio_chunk",
@@ -981,6 +1030,12 @@ async def stream_ai_response(
     if not full_text_clean:
         full_text_clean = "I'm sorry, I had a small hiccup there. Could you say that again?"
         try:
+            if filler_task is not None and not filler_task.done() and not _filler_stopped:
+                filler_task.cancel()
+                try:
+                    await filler_task
+                except asyncio.CancelledError:
+                    pass
             audio_bytes = await synthesize_speech(full_text_clean)
             await ws.send_json({"type": "audio_chunk", "sentence": full_text_clean,
                                 "question": question_num, "first": True})
@@ -1054,12 +1109,13 @@ async def get_candidate_results(candidate_id: str):
 async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
 
-    conversation:   list[dict] = []
-    question_num    = 0
-    session_start   = None
-    candidate_id:   str | None = None
-    candidate_name: str = ""
-    candidate_email: str = ""
+    conversation:        list[dict] = []
+    question_num         = 0
+    session_start        = None
+    candidate_id:        str | None = None
+    candidate_name:      str = ""
+    candidate_email:     str = ""
+    session_last_fillers: list[str] = []
 
     # connected is sent immediately so the onboarding ping-test and the
     # interview page both get a quick acknowledgement.
@@ -1184,14 +1240,20 @@ async def websocket_endpoint(ws: WebSocket):
 
             await ws.send_json({"type": "thinking"})
 
-            # Send a pre-baked filler immediately to mask TTFT latency.
+            # Send a pre-baked filler immediately to mask TTFT latency, avoiding repeats.
+            filler_task = None
             if _filler_audio:
-                filler_text = random.choice(list(_filler_audio.keys()))
+                available = list(_filler_audio.keys())
+                choices = [f for f in available if f not in session_last_fillers[-2:]] or available
+                filler_text = random.choice(choices)
+                session_last_fillers.append(filler_text)
                 await ws.send_json({
                     "type": "audio_chunk", "sentence": filler_text,
                     "question": None, "first": False,
                 })
                 await ws.send_bytes(_filler_audio[filler_text])
+                # Keep sending fillers until real AI audio arrives
+                filler_task = asyncio.create_task(_send_filler_loop(ws, session_last_fillers))
 
             elapsed_min  = (time.time() - session_start) / 60
             is_wrapping  = elapsed_min >= SESSION_WARN_MINUTES
@@ -1204,8 +1266,10 @@ async def websocket_endpoint(ws: WebSocket):
 
             question_num += 1
             try:
-                clean_text, llm_complete = await stream_ai_response(ws, messages, question_num)
+                clean_text, llm_complete = await stream_ai_response(ws, messages, question_num, filler_task)
             except Exception as exc:
+                if filler_task and not filler_task.done():
+                    filler_task.cancel()
                 if candidate_id:
                     asyncio.create_task(_score_and_persist(candidate_id, conversation, candidate_name, candidate_email))
                 try:
