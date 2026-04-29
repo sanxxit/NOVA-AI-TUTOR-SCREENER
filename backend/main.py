@@ -925,8 +925,8 @@ def synthesize_with_piper(text: str) -> bytes:
 async def synthesize_speech(text: str) -> bytes:
     """
     Primary TTS: Sarvam AI (Indian accent, ritu/bulbul:v3).
-    Falls back silently to local Piper if Sarvam is unavailable or returns an error.
-    Uses the module-level _http_client to reuse TLS connections across calls.
+    Falls back to local Piper if available; returns empty bytes if neither works
+    so the interview session never crashes due to a TTS outage.
     """
     if SARVAM_API_KEY:
         try:
@@ -948,7 +948,16 @@ async def synthesize_speech(text: str) -> bytes:
             return base64.b64decode(audio_b64)
         except Exception as exc:
             print(f"[Sarvam TTS] error — falling back to Piper: {exc}", flush=True)
-    return await asyncio.to_thread(synthesize_with_piper, text)
+
+    # Piper is only present in local dev; on cloud it won't exist — fail silently
+    if os.path.exists(PIPER_BIN):
+        try:
+            return await asyncio.to_thread(synthesize_with_piper, text)
+        except Exception as exc:
+            print(f"[Piper TTS] error: {exc}", flush=True)
+
+    print("[TTS] No TTS available — returning empty audio.", flush=True)
+    return b""
 
 
 # ─── Streaming helpers ────────────────────────────────────────────────────────
@@ -1062,7 +1071,8 @@ async def stream_ai_response(
             "question": question_num if is_first else None,
             "first":    is_first,
         })
-        await ws.send_bytes(audio_bytes)
+        if audio_bytes:
+            await ws.send_bytes(audio_bytes)
         is_first = False
 
     try:
@@ -1100,7 +1110,8 @@ async def stream_ai_response(
             audio_bytes = await synthesize_speech(full_text_clean)
             await ws.send_json({"type": "audio_chunk", "sentence": full_text_clean,
                                 "question": question_num, "first": True})
-            await ws.send_bytes(audio_bytes)
+            if audio_bytes:
+                await ws.send_bytes(audio_bytes)
         except Exception:
             pass
 
@@ -1114,7 +1125,8 @@ async def send_single_turn(ws: WebSocket, text: str, question: int) -> None:
     """Synthesize and send a hardcoded string as one audio_chunk (used for the opening)."""
     audio_bytes = await synthesize_speech(text)
     await ws.send_json({"type": "audio_chunk", "sentence": text, "question": question, "first": True})
-    await ws.send_bytes(audio_bytes)
+    if audio_bytes:
+        await ws.send_bytes(audio_bytes)
     await ws.send_json({"type": "turn_end", "full_text": text, "is_final": True})
 
 
