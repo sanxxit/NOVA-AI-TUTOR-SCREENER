@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 
-type Step = 'init' | 'loading-model' | 'connecting' | 'mic-check' | 'audio-test' | 'ready' | 'error';
+type Step = 'init' | 'connecting' | 'mic-check' | 'audio-test' | 'ready' | 'error';
 
 interface State {
   step: Step;
@@ -13,10 +13,9 @@ interface State {
 }
 
 const SETUP_STEPS = [
-  { label: 'Voice environment ready',    doneAt: 12  },
-  { label: 'Speech recognition loaded',  doneAt: 80  },
-  { label: 'Interview server connected', doneAt: 87  },
-  { label: 'Microphone verified',        doneAt: 93  },
+  { label: 'Voice environment ready',    doneAt: 15  },
+  { label: 'Interview server connected', doneAt: 55  },
+  { label: 'Microphone verified',        doneAt: 75  },
   { label: 'Audio quality confirmed',    doneAt: 100 },
 ];
 
@@ -34,62 +33,34 @@ export default function OnboardingPage() {
   const [audioBars,    setAudioBars]    = useState<number[]>(new Array(32).fill(0));
   const [audioDetected, setAudioDetected] = useState(false);
 
-  const cancelledRef    = useRef(false);
-  const fileProgressRef = useRef(new Map<string, { loaded: number; total: number }>());
-  const animFrameRef    = useRef<number>(0);
-  const streamRef       = useRef<MediaStream | null>(null);
+  const firstName = useState<string>(() => {
+    if (typeof window === 'undefined') return '';
+    try {
+      const raw = localStorage.getItem('candidate_session');
+      const name = raw ? (JSON.parse(raw).name ?? '') : '';
+      return name.split(' ')[0];
+    } catch { return ''; }
+  })[0];
+
+  const cancelledRef = useRef(false);
+  const animFrameRef = useRef<number>(0);
+  const streamRef    = useRef<MediaStream | null>(null);
 
   useEffect(() => {
     cancelledRef.current = false;
 
     const run = async () => {
-      for (let i = 0; i <= 12; i++) {
+      // 0→15%: quick init
+      for (let i = 0; i <= 15; i++) {
         if (cancelledRef.current) return;
         setState((s) => ({ ...s, progress: i }));
-        await sleep(35);
+        await sleep(30);
       }
 
-      setState((s) => ({ ...s, step: 'loading-model', message: 'Loading speech recognition model…' }));
+      // 15→53%: smooth animation while connecting
+      setState((s) => ({ ...s, step: 'connecting', message: 'Connecting to interview server…' }));
 
-      try {
-        const { pipeline, env } = await import('@xenova/transformers');
-        env.allowLocalModels = false;
-
-        await pipeline('automatic-speech-recognition', 'Xenova/whisper-base.en', {
-          progress_callback: (info: any) => {
-            if (cancelledRef.current) return;
-            if (info.status === 'progress' && info.total) {
-              fileProgressRef.current.set(info.file, { loaded: info.loaded ?? 0, total: info.total });
-              const files   = Array.from(fileProgressRef.current.values());
-              const loaded  = files.reduce((s, f) => s + f.loaded, 0);
-              const total   = files.reduce((s, f) => s + f.total,  0);
-              const pct     = total > 0 ? loaded / total : 0;
-              const overall = Math.round(12 + pct * 68);
-              setState((s) => ({
-                ...s,
-                progress: Math.max(s.progress, overall),
-                message:  `Loading model… ${Math.round(pct * 100)}%`,
-              }));
-            }
-            if (info.status === 'ready') {
-              setState((s) => ({ ...s, progress: Math.max(s.progress, 78), message: 'Model ready.' }));
-            }
-          },
-        });
-      } catch {
-        if (!cancelledRef.current) {
-          setState({ step: 'error', progress: 0, message: '', error: 'Failed to load the speech model. Check your connection and refresh.' });
-        }
-        return;
-      }
-
-      if (cancelledRef.current) return;
-      setState((s) => ({ ...s, progress: Math.max(s.progress, 80), message: 'Model ready.' }));
-      await sleep(300);
-
-      setState((s) => ({ ...s, step: 'connecting', progress: 83, message: 'Connecting to interview server…' }));
-
-      try {
+      const wsConnectPromise = (async () => {
         const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
         await new Promise<void>((resolve, reject) => {
           const ws      = new WebSocket(wsUrl);
@@ -101,15 +72,33 @@ export default function OnboardingPage() {
           };
           ws.onerror = () => { clearTimeout(timeout); reject(new Error('Could not reach server')); };
         });
+      })();
+
+      // Animate progress from 15→53 while WS connects (looks smooth, ~800ms)
+      for (let i = 16; i <= 53; i++) {
+        if (cancelledRef.current) return;
+        setState((s) => ({ ...s, progress: i }));
+        await sleep(18);
+      }
+
+      try {
+        await wsConnectPromise;
       } catch (err: any) {
         if (!cancelledRef.current) {
-          setState({ step: 'error', progress: 83, message: '', error: `Server unreachable: ${err.message}. Make sure the backend is running on port 8000.` });
+          setState({ step: 'error', progress: 53, message: '', error: `Server unreachable: ${err.message}. Make sure the backend is running.` });
         }
         return;
       }
 
       if (cancelledRef.current) return;
-      setState((s) => ({ ...s, step: 'mic-check', progress: 87, message: 'One last step — microphone access.' }));
+
+      // 53→55%: connected
+      for (let i = 54; i <= 55; i++) {
+        setState((s) => ({ ...s, progress: i }));
+        await sleep(40);
+      }
+
+      setState((s) => ({ ...s, step: 'mic-check', progress: 55, message: 'One last step — microphone access.' }));
     };
 
     run();
@@ -132,7 +121,7 @@ export default function OnboardingPage() {
       analyser.smoothingTimeConstant = 0.75;
       source.connect(analyser);
 
-      setState((s) => ({ ...s, step: 'audio-test', progress: 93, message: 'Mic connected. Say a few words to test.' }));
+      setState((s) => ({ ...s, step: 'audio-test', progress: 75, message: 'Mic connected. Say a few words to test.' }));
 
       const tick = () => {
         const data = new Uint8Array(analyser.frequencyBinCount);
@@ -156,7 +145,7 @@ export default function OnboardingPage() {
     cancelAnimationFrame(animFrameRef.current);
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
-    for (let i = 93; i <= 100; i++) {
+    for (let i = 76; i <= 100; i++) {
       setState((s) => ({ ...s, progress: i, message: "All set — you're ready to go." }));
       await sleep(22);
     }
@@ -165,7 +154,7 @@ export default function OnboardingPage() {
 
   const { step, progress, message, error } = state;
   const isReady   = step === 'ready';
-  const isLoading = step === 'init' || step === 'loading-model' || step === 'connecting';
+  const isLoading = step === 'init' || step === 'connecting';
 
   return (
     <main className="min-h-screen bg-[#09090B] flex flex-col items-center justify-center px-6 py-16">
@@ -189,7 +178,9 @@ export default function OnboardingPage() {
             ))}
           </div>
           <h2 className="text-2xl font-bold text-white">
-            {isReady ? "You're all set." : 'Getting your voice environment ready.'}
+            {isReady
+              ? firstName ? `You're all set, ${firstName}.` : "You're all set."
+              : firstName ? `Hey ${firstName}, let's get you ready.` : 'Getting your voice environment ready.'}
           </h2>
           {!isReady && (
             <p className="text-zinc-600 text-sm">
@@ -197,7 +188,7 @@ export default function OnboardingPage() {
                 ? 'Almost there — one quick permission needed.'
                 : step === 'audio-test'
                 ? "Take a breath. There's no rush."
-                : 'This only downloads once — future sessions are instant.'}
+                : 'Takes about 10 seconds — checking your connection and microphone.'}
             </p>
           )}
         </div>

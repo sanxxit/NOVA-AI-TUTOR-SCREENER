@@ -133,6 +133,18 @@ def init_db() -> None:
                 completed_at    TEXT
             )
         """))
+        conn.execute(text("""
+            ALTER TABLE candidates ADD COLUMN IF NOT EXISTS unlocked INTEGER DEFAULT 0
+        """))
+        conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS invite_tokens (
+                token      TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL,
+                note       TEXT,
+                used_at    TEXT,
+                used_by    TEXT
+            )
+        """))
 
 
 def db_save_candidate(candidate_id: str, name: str, email: str) -> None:
@@ -152,18 +164,51 @@ def db_save_candidate(candidate_id: str, name: str, email: str) -> None:
         )
 
 
-def db_check_email_completed(email: str) -> bool:
-    """Return True if this email already has a completed interview row."""
+def db_check_email_completed(email: str) -> str | None:
+    """Return the candidate_id if this email has a completed interview, else None."""
     with _engine.connect() as conn:
         row = conn.execute(
             text("""
-                SELECT 1 FROM candidates
-                WHERE email = :email AND completed_at IS NOT NULL
+                SELECT candidate_id FROM candidates
+                WHERE email = :email AND completed_at IS NOT NULL AND unlocked = 0
                 LIMIT 1
             """),
             {"email": email.lower().strip()},
         ).fetchone()
-        return row is not None
+        return row[0] if row else None
+
+
+def _db_unlock_candidate(email: str) -> None:
+    with _engine.begin() as conn:
+        conn.execute(
+            text("UPDATE candidates SET unlocked = 1 WHERE email = :email AND completed_at IS NOT NULL"),
+            {"email": email},
+        )
+
+
+def db_create_invite(token: str, note: str) -> None:
+    with _engine.begin() as conn:
+        conn.execute(
+            text("INSERT INTO invite_tokens (token, created_at, note) VALUES (:token, :created_at, :note)"),
+            {"token": token, "created_at": _now_iso(), "note": note},
+        )
+
+
+def db_validate_invite(token: str) -> dict | None:
+    with _engine.connect() as conn:
+        row = conn.execute(
+            text("SELECT token, note, used_at FROM invite_tokens WHERE token = :token"),
+            {"token": token},
+        ).mappings().fetchone()
+        return dict(row) if row else None
+
+
+def db_use_invite(token: str, email: str) -> None:
+    with _engine.begin() as conn:
+        conn.execute(
+            text("UPDATE invite_tokens SET used_at = :used_at, used_by = :email WHERE token = :token"),
+            {"used_at": _now_iso(), "email": email, "token": token},
+        )
 
 
 def db_get_all_completed() -> list[dict]:
@@ -172,7 +217,7 @@ def db_get_all_completed() -> list[dict]:
         rows = conn.execute(
             text("""
                 SELECT candidate_id, name, email, overall_score, passed,
-                       completed_at, created_at, scores_json, transcript_json
+                       completed_at, created_at, unlocked, scores_json, transcript_json
                 FROM   candidates
                 WHERE  completed_at IS NOT NULL
                 ORDER  BY completed_at DESC
@@ -630,7 +675,7 @@ DIMENSION_WEIGHTS = {
     "fluency":      0.10,
 }
 
-PASS_THRESHOLD = 3.0
+PASS_THRESHOLD = 3.5
 
 QUOTE_EXTRACTION_PROMPT = """You are evaluating a tutor job screener interview.
 Extract the single most revealing verbatim quote from the CANDIDATE (not the interviewer) for each dimension below.
@@ -725,9 +770,24 @@ async def run_scoring_pipeline(conversation: list[dict]) -> dict:
     if candidate_words < 15:
         return _make_empty_result()
 
+    # Guard: require at least 4 candidate turns (questions answered).
+    # Fewer means the interview was ended prematurely — hard fail rather than
+    # letting the LLM fill in neutral 3/5 scores for untested dimensions.
+    candidate_turns = sum(1 for m in conversation if m["role"] == "user")
+    if candidate_turns < 4:
+        return _make_empty_result()
+
     transcript = "\n".join(
         f"{'Interviewer' if m['role'] == 'assistant' else 'Candidate'}: {m['content']}"
         for m in conversation
+    )
+
+    # Tell the LLM how complete this interview is so it doesn't invent evidence.
+    completeness_note = (
+        f"NOTE: The candidate answered {candidate_turns} question(s). "
+        f"A full interview covers 5–7 questions across all 5 dimensions. "
+        f"For any dimension where no direct evidence exists in the transcript, "
+        f"you MUST score it 1 — absence of evidence is not neutrality, it is failure."
     )
 
     # Step 1 — extract one key quote per dimension
@@ -737,7 +797,7 @@ async def run_scoring_pipeline(conversation: list[dict]) -> dict:
                 model="llama-3.3-70b-versatile",
                 messages=[
                     {"role": "system", "content": QUOTE_EXTRACTION_PROMPT},
-                    {"role": "user", "content": f"INTERVIEW TRANSCRIPT:\n{transcript}"},
+                    {"role": "user", "content": f"{completeness_note}\n\nINTERVIEW TRANSCRIPT:\n{transcript}"},
                 ],
                 temperature=0.1,
                 max_tokens=600,
@@ -758,6 +818,7 @@ async def run_scoring_pipeline(conversation: list[dict]) -> dict:
                     {
                         "role": "user",
                         "content": (
+                            f"{completeness_note}\n\n"
                             f"INTERVIEW TRANSCRIPT:\n{transcript}\n\n"
                             f"KEY QUOTES:\n{json.dumps(quotes, indent=2)}"
                         ),
@@ -770,7 +831,7 @@ async def run_scoring_pipeline(conversation: list[dict]) -> dict:
         )
         scores: dict = json.loads(s_resp.choices[0].message.content)
     except Exception:
-        scores = {d: {"final_score": 3, "rubric_anchor": "Score unavailable.", "observed_behavior": "", "positive_signals": [], "negative_signals": []} for d in DIMENSION_WEIGHTS}
+        scores = {d: {"final_score": 1, "rubric_anchor": "Score unavailable — API error.", "observed_behavior": "", "positive_signals": [], "negative_signals": []} for d in DIMENSION_WEIGHTS}
 
     # Combine into final structured result
     weighted_sum = 0.0
@@ -1097,6 +1158,42 @@ async def admin_candidates(_: None = Depends(verify_token)):
     return rows
 
 
+@app.get("/api/check-email")
+async def check_email_completed(email: str):
+    """Return whether this email already has a completed interview, and its candidate_id."""
+    existing_id = await asyncio.to_thread(db_check_email_completed, email)
+    if existing_id:
+        return {"completed": True, "candidate_id": existing_id}
+    return {"completed": False}
+
+
+@app.post("/api/admin/unlock")
+async def unlock_candidate(payload: dict, _: None = Depends(verify_token)):
+    email = payload.get("email", "").strip().lower()
+    if not email:
+        raise HTTPException(status_code=400, detail="email required")
+    await asyncio.to_thread(_db_unlock_candidate, email)
+    return {"unlocked": True, "email": email}
+
+
+@app.post("/api/admin/invite")
+async def create_invite(payload: dict, _: None = Depends(verify_token)):
+    note = payload.get("note", "").strip()
+    token = secrets.token_urlsafe(20)
+    await asyncio.to_thread(db_create_invite, token, note)
+    return {"token": token}
+
+
+@app.get("/api/invite/{token}")
+async def validate_invite(token: str):
+    row = await asyncio.to_thread(db_validate_invite, token)
+    if not row:
+        raise HTTPException(status_code=404, detail="Invalid invite link.")
+    if row["used_at"]:
+        raise HTTPException(status_code=410, detail="This invite link has already been used.")
+    return {"valid": True, "note": row["note"]}
+
+
 @app.get("/api/results/{candidate_id}")
 async def get_candidate_results(candidate_id: str):
     row = await asyncio.to_thread(db_get_candidate, candidate_id)
@@ -1137,14 +1234,17 @@ async def websocket_endpoint(ws: WebSocket):
 
             # Re-interview prevention: block if this email already has a completed session
             if email:
-                already_done = await asyncio.to_thread(db_check_email_completed, email)
-                if already_done:
-                    await ws.send_json({"type": "already_completed"})
+                existing_id = await asyncio.to_thread(db_check_email_completed, email)
+                if existing_id:
+                    await ws.send_json({"type": "already_completed", "candidate_id": existing_id})
                     return  # Close the handler; frontend will redirect the user
 
             candidate_id = cid
             if candidate_id:
                 await asyncio.to_thread(db_save_candidate, candidate_id, name, email)
+            invite_token = msg.get("invite_token") or None
+            if invite_token and candidate_email:
+                await asyncio.to_thread(db_use_invite, invite_token, candidate_email)
 
         elif msg.get("type") == "start_interview":
             session_start = time.time()

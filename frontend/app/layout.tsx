@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { ThemeProvider } from 'next-themes';
+import CandidateSessionBadge from '@/components/CandidateSessionBadge';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -20,10 +21,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body className="font-sans antialiased">
         <ThemeProvider attribute="class" defaultTheme="dark" enableSystem={false}>
-          <div className="fixed top-0 left-0 z-50 h-14 flex items-center px-6 pointer-events-none select-none">
+          <div className="fixed top-0 left-0 right-0 z-50 h-14 flex items-center justify-between px-6 pointer-events-none select-none">
             <span className="text-base font-black tracking-widest text-slate-900 dark:text-white">
               NOVA
             </span>
+            <CandidateSessionBadge />
           </div>
           {children}
         </ThemeProvider>

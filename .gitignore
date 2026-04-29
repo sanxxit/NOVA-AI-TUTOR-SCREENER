@@ -49,3 +49,8 @@ Thumbs.db
 # ── Misc ─────────────────────────────────────────────────────────────────────
 *.log
 backend/=*
+
+# ── Claude Code internal files ────────────────────────────────────────────────
+.claude/
+aienginner.md
+interview.md

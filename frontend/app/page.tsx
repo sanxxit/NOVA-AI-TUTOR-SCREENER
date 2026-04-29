@@ -5,6 +5,8 @@ import { useState, FormEvent, useRef, useEffect, useCallback } from 'react';
 import { useTheme } from 'next-themes';
 import ThemeToggle from '@/components/ThemeToggle';
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 const TICKER_SEP = ' '.repeat(15) + '◆' + ' '.repeat(15);
 const TICKER_TEXT = `HIRING MATH TUTOR${TICKER_SEP}BEST VOICE INTERVIEW PLATFORM${TICKER_SEP}`;
 
@@ -66,6 +68,12 @@ export default function LandingPage() {
   const { resolvedTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
+
+  // Clear stale session so the badge doesn't show a previous user before login
+  useEffect(() => {
+    localStorage.removeItem('candidate_session');
+    window.dispatchEvent(new Event('candidateSessionUpdated'));
+  }, []);
   const isDark = !mounted || resolvedTheme !== 'light';
 
   // Form state
@@ -156,7 +164,7 @@ export default function LandingPage() {
     }
   };
 
-  const handleSubmit = (e: FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
     const trimmedName  = name.trim();
@@ -173,11 +181,25 @@ export default function LandingPage() {
     }
     stopMic();
     setSubmitting(true);
+
+    // Check if this email already completed an interview — redirect to their past results
+    try {
+      const res = await fetch(`${API_URL}/api/check-email?email=${encodeURIComponent(trimmedEmail)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.completed && data.candidate_id) {
+          router.push(`/results/${data.candidate_id}`);
+          return;
+        }
+      }
+    } catch { /* network error — proceed normally, WebSocket will catch it */ }
+
     const candidateId = crypto.randomUUID();
     localStorage.setItem(
       'candidate_session',
       JSON.stringify({ candidate_id: candidateId, name: trimmedName, email: trimmedEmail }),
     );
+    window.dispatchEvent(new Event('candidateSessionUpdated'));
     router.push('/onboarding');
   };
 

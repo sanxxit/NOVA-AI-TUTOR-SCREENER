@@ -32,11 +32,13 @@ interface Candidate {
   passed:        boolean;
   completed_at:  string;
   created_at:    string;
+  unlocked?:     number;
   scores:        Scores;
   transcript:    { role: string; content: string }[];
 }
 
 type FilterType = 'all' | 'pass' | 'fail';
+type SortKey    = 'recent' | 'score-desc' | 'score-asc';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -396,8 +398,21 @@ export default function AdminPage() {
   const [error,      setError]      = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [filter,     setFilter]     = useState<FilterType>('all');
+  const [sortKey,    setSortKey]    = useState<SortKey>('recent');
   const [conversationFor, setConversationFor] = useState<Candidate | null>(null);
   const [reasoningFor,    setReasoningFor]    = useState<Candidate | null>(null);
+
+  // Unlock state
+  const [unlockingEmail, setUnlockingEmail] = useState<string | null>(null);
+  const [unlockMsg,      setUnlockMsg]      = useState('');
+  const [unlockedEmails, setUnlockedEmails] = useState<Set<string>>(new Set());
+
+  // Invite state
+  const [showInviteModal,  setShowInviteModal]  = useState(false);
+  const [inviteNote,       setInviteNote]       = useState('');
+  const [generatedLink,    setGeneratedLink]    = useState('');
+  const [generatingInvite, setGeneratingInvite] = useState(false);
+  const [copied,           setCopied]           = useState(false);
 
   useEffect(() => {
     const token = sessionStorage.getItem('admin_token');
@@ -412,7 +427,61 @@ export default function AdminPage() {
       .catch((err) => { setError(`Could not load data — ${err.message}`); setLoading(false); });
   }, [router]);
 
-  const filtered  = candidates.filter((c) => filter === 'all' ? true : filter === 'pass' ? c.passed : !c.passed);
+  useEffect(() => {
+    if (!unlockMsg) return;
+    const t = setTimeout(() => setUnlockMsg(''), 3000);
+    return () => clearTimeout(t);
+  }, [unlockMsg]);
+
+  const handleUnlock = async (email: string) => {
+    const token = sessionStorage.getItem('admin_token');
+    if (!token) return;
+    setUnlockingEmail(email);
+    setUnlockMsg('');
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/unlock`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ email }),
+      });
+      if (!res.ok) throw new Error('Failed');
+      setUnlockedEmails((prev) => new Set(prev).add(email));
+      setUnlockMsg(`${email} unlocked for one re-attempt.`);
+    } catch {
+      setUnlockMsg(`Failed to unlock ${email}.`);
+    } finally {
+      setUnlockingEmail(null);
+    }
+  };
+
+  const handleGenerateInvite = async () => {
+    const token = sessionStorage.getItem('admin_token');
+    if (!token) return;
+    setGeneratingInvite(true);
+    setGeneratedLink('');
+    setCopied(false);
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/invite`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ note: inviteNote }),
+      });
+      const data = await res.json();
+      setGeneratedLink(`${window.location.origin}/apply/${data.token}`);
+    } finally {
+      setGeneratingInvite(false);
+    }
+  };
+
+  const filtered = candidates.filter((c) => filter === 'all' ? true : filter === 'pass' ? c.passed : !c.passed);
+  const sorted   = [...filtered].sort((a, b) => {
+    if (sortKey === 'score-desc') {
+      if (b.overall_score !== a.overall_score) return b.overall_score - a.overall_score;
+      return new Date(b.completed_at).getTime() - new Date(a.completed_at).getTime();
+    }
+    if (sortKey === 'score-asc') return a.overall_score - b.overall_score;
+    return new Date(b.completed_at).getTime() - new Date(a.completed_at).getTime();
+  });
   const passCount = candidates.filter((c) => c.passed).length;
   const failCount = candidates.length - passCount;
   const avgScore  = candidates.length
@@ -466,7 +535,7 @@ export default function AdminPage() {
               ))}
 
               <button
-                onClick={() => downloadCSV(filtered)}
+                onClick={() => downloadCSV(sorted)}
                 className="flex items-center gap-2 text-xs font-medium px-4 py-3 rounded-lg border border-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-600 transition-all duration-150"
                 style={{ background: 'rgba(255,255,255,0.02)' }}
               >
@@ -475,34 +544,109 @@ export default function AdminPage() {
                 </svg>
                 Download CSV
               </button>
+
+              <button
+                onClick={() => { setShowInviteModal(true); setGeneratedLink(''); setInviteNote(''); setCopied(false); }}
+                className="flex items-center gap-2 text-xs font-medium px-4 py-3 rounded-lg border transition-all duration-150"
+                style={{ background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.30)', color: '#A78BFA' }}
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                </svg>
+                Generate Invite Link
+              </button>
             </div>
           )}
         </div>
 
         <div className="h-px bg-zinc-900" />
 
-        {/* Filter bar */}
+        {/* Filter + Sort bar */}
         {!loading && candidates.length > 0 && (
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs text-zinc-400 font-medium">Filter:</span>
-            {([
-              { key: 'all',  label: `All (${candidates.length})` },
-              { key: 'pass', label: `Selected (${passCount})` },
-              { key: 'fail', label: `Not Selected (${failCount})` },
-            ] as { key: FilterType; label: string }[]).map(({ key, label }) => (
-              <button
-                key={key}
-                onClick={() => setFilter(key)}
-                className="text-xs px-3 py-1.5 rounded-md border transition-all duration-150 font-medium"
-                style={{
-                  background:  filter === key ? 'rgba(139,92,246,0.15)' : 'transparent',
-                  color:       filter === key ? '#A78BFA' : '#D4D4D8',
-                  borderColor: filter === key ? 'rgba(139,92,246,0.40)' : '#27272A',
-                }}
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+
+            {/* Filter pills */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-zinc-600 font-medium">Filter:</span>
+              {([
+                { key: 'all',  label: `All (${candidates.length})` },
+                { key: 'pass', label: `Selected (${passCount})` },
+                { key: 'fail', label: `Not Selected (${failCount})` },
+              ] as { key: FilterType; label: string }[]).map(({ key, label }) => (
+                <button
+                  key={key}
+                  onClick={() => setFilter(key)}
+                  className="text-xs px-3 py-1.5 rounded-md border transition-all duration-150 font-medium"
+                  style={{
+                    background:  filter === key ? 'rgba(139,92,246,0.15)' : 'transparent',
+                    color:       filter === key ? '#A78BFA' : '#71717A',
+                    borderColor: filter === key ? 'rgba(139,92,246,0.40)' : '#27272A',
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {/* Sort segmented control */}
+            <div className="flex items-center gap-2.5">
+              <span className="text-xs text-zinc-600 font-medium">Sort:</span>
+              <div
+                className="flex items-center rounded-lg p-0.5 gap-0.5"
+                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
               >
-                {label}
-              </button>
-            ))}
+                {([
+                  {
+                    key:   'score-desc' as SortKey,
+                    label: 'High → Low',
+                    icon:  (
+                      <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 4h13M3 8h9m-9 4h6m4 0l4 4m0 0l4-4m-4 4V4" />
+                      </svg>
+                    ),
+                  },
+                  {
+                    key:   'score-asc' as SortKey,
+                    label: 'Low → High',
+                    icon:  (
+                      <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 4h13M3 8h9m-9 4h9m5-4v12m0 0l-4-4m4 4l4-4" />
+                      </svg>
+                    ),
+                  },
+                  {
+                    key:   'recent' as SortKey,
+                    label: 'Recent',
+                    icon:  (
+                      <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                    ),
+                  },
+                ]).map(({ key, label, icon }) => {
+                  const active = sortKey === key;
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => setSortKey(key)}
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-medium transition-all duration-200 whitespace-nowrap"
+                      style={{
+                        background: active
+                          ? 'linear-gradient(135deg, rgba(124,58,237,0.40) 0%, rgba(168,85,247,0.30) 100%)'
+                          : 'transparent',
+                        color:       active ? '#C4B5FD' : '#52525B',
+                        border:      active ? '1px solid rgba(139,92,246,0.35)' : '1px solid transparent',
+                        boxShadow:   active ? '0 0 10px rgba(139,92,246,0.20)' : 'none',
+                      }}
+                    >
+                      {icon}
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
           </div>
         )}
 
@@ -530,20 +674,20 @@ export default function AdminPage() {
           </div>
         )}
 
-        {!loading && !error && candidates.length > 0 && filtered.length === 0 && (
+        {!loading && !error && candidates.length > 0 && sorted.length === 0 && (
           <div className="rounded-lg border border-zinc-800 p-8 text-center">
             <p className="text-zinc-300 text-sm">No candidates match this filter.</p>
           </div>
         )}
 
         {/* Table */}
-        {!loading && !error && filtered.length > 0 && (
+        {!loading && !error && sorted.length > 0 && (
           <div className="rounded-xl border border-zinc-900 overflow-hidden" style={{ background: '#000' }}>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-zinc-900" style={{ background: '#000' }}>
-                    {['Unique ID', 'Name', 'Email', 'Score', 'Result', 'Completed', 'Conversation', 'AI Reasoning', ''].map((h) => (
+                    {['Unique ID', 'Name', 'Email', 'Score', 'Result', 'Completed', 'Conversation', 'AI Reasoning', 'Actions', ''].map((h) => (
                       <th
                         key={h}
                         className="py-3 px-4 text-left text-[11px] font-medium text-zinc-400 tracking-[0.07em] uppercase whitespace-nowrap"
@@ -554,7 +698,7 @@ export default function AdminPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((c) => {
+                  {sorted.map((c) => {
                     const isOpen = expandedId === c.candidate_id;
                     return (
                       <>
@@ -622,6 +766,56 @@ export default function AdminPage() {
                             </button>
                           </td>
 
+                          {/* Actions — Unlock */}
+                          <td className="py-4 px-4">
+                            {(() => {
+                              const isUnlocking = unlockingEmail === c.email;
+                              const isUnlocked  = c.unlocked === 1 || unlockedEmails.has(c.email);
+
+                              if (isUnlocking) return (
+                                <button
+                                  disabled
+                                  className="flex items-center gap-1.5 text-[10px] px-3 py-1.5 rounded border border-amber-500/30 text-amber-400 disabled:opacity-60 whitespace-nowrap font-medium"
+                                >
+                                  <div className="w-2.5 h-2.5 rounded-full border border-amber-400/40 border-t-amber-400 animate-spin flex-shrink-0" />
+                                  Unlocking…
+                                </button>
+                              );
+
+                              if (isUnlocked) return (
+                                <div
+                                  className="group/unlock relative flex items-center gap-1.5 text-[10px] px-3 py-1.5 rounded whitespace-nowrap font-medium cursor-default"
+                                  style={{ background: 'rgba(16,185,129,0.08)', border: '1px solid rgba(16,185,129,0.35)', color: '#34D399' }}
+                                >
+                                  <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 10.5V6.75a4.5 4.5 0 119 0v3.75M3.75 21.75h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H3.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                                  </svg>
+                                  Unlocked
+                                  {/* Tooltip */}
+                                  <div
+                                    className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2.5 py-1.5 rounded pointer-events-none z-20 whitespace-nowrap opacity-0 group-hover/unlock:opacity-100 transition-opacity duration-150 text-[10px]"
+                                    style={{ background: '#18181B', border: '1px solid #27272A', color: '#A1A1AA' }}
+                                  >
+                                    Auto-locks after candidate retakes
+                                    <div className="absolute top-full left-1/2 -translate-x-1/2" style={{ width: 0, height: 0, borderLeft: '4px solid transparent', borderRight: '4px solid transparent', borderTop: '4px solid #27272A' }} />
+                                  </div>
+                                </div>
+                              );
+
+                              return (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleUnlock(c.email); }}
+                                  className="flex items-center gap-1.5 text-[10px] px-3 py-1.5 rounded border border-amber-500/30 text-amber-400 hover:bg-amber-500/10 transition-all duration-150 whitespace-nowrap font-medium"
+                                >
+                                  <svg className="w-3 h-3 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                                  </svg>
+                                  Unlock
+                                </button>
+                              );
+                            })()}
+                          </td>
+
                           {/* Expand */}
                           <td className="py-4 px-4 text-right">
                             <button
@@ -644,7 +838,7 @@ export default function AdminPage() {
                         {/* Expanded dimension cards */}
                         {isOpen && (
                           <tr key={`${c.candidate_id}-detail`} className="border-b border-zinc-900 last:border-0">
-                            <td colSpan={9} className="p-0">
+                            <td colSpan={10} className="p-0">
                               <div className="px-4 py-5" style={{ background: 'rgba(139,92,246,0.025)', borderTop: '1px solid rgba(139,92,246,0.12)' }}>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
                                   {DIM_ORDER.map((key) => {
@@ -679,6 +873,82 @@ export default function AdminPage() {
         <Modal title={`AI Assessment Reasoning — ${reasoningFor.name}`} onClose={() => setReasoningFor(null)}>
           <ReasoningView candidate={reasoningFor} />
         </Modal>
+      )}
+
+      {/* Invite Link Modal */}
+      {showInviteModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          style={{ background: 'rgba(0,0,0,0.75)', backdropFilter: 'blur(8px)' }}
+          onClick={() => setShowInviteModal(false)}
+        >
+          <div
+            className="flex flex-col gap-5 p-7 rounded-2xl w-full max-w-sm mx-6"
+            style={{ background: '#111113', border: '1px solid rgba(255,255,255,0.10)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <p className="text-base font-bold text-white">Generate Invite Link</p>
+              <button onClick={() => setShowInviteModal(false)} className="text-zinc-600 hover:text-zinc-400 transition-colors">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider">Note / Label (optional)</label>
+              <input
+                type="text"
+                value={inviteNote}
+                onChange={(e) => setInviteNote(e.target.value)}
+                placeholder="e.g. Batch Jan 2025"
+                className="w-full bg-white/[0.04] border border-white/[0.10] rounded-lg px-3 py-2.5 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-violet-500/50 transition-all"
+              />
+            </div>
+            <button
+              onClick={handleGenerateInvite}
+              disabled={generatingInvite}
+              className="w-full py-2.5 rounded-lg text-sm font-semibold text-white transition-all duration-200 disabled:opacity-50"
+              style={{ background: 'linear-gradient(135deg, #7C3AED 0%, #A855F7 100%)' }}
+            >
+              {generatingInvite ? 'Generating…' : 'Generate Link'}
+            </button>
+            {generatedLink && (
+              <div className="space-y-2">
+                <label className="text-[11px] font-medium text-zinc-400 uppercase tracking-wider">Invite Link</label>
+                <div className="flex gap-2">
+                  <input
+                    readOnly
+                    value={generatedLink}
+                    className="flex-1 bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-2 text-xs text-zinc-300 font-mono focus:outline-none"
+                  />
+                  <button
+                    onClick={() => { navigator.clipboard.writeText(generatedLink); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+                    className="px-3 py-2 rounded-lg text-xs font-medium transition-all duration-150"
+                    style={{
+                      background: copied ? 'rgba(16,185,129,0.15)' : 'rgba(139,92,246,0.15)',
+                      border: copied ? '1px solid rgba(16,185,129,0.30)' : '1px solid rgba(139,92,246,0.30)',
+                      color: copied ? '#10B981' : '#A78BFA',
+                    }}
+                  >
+                    {copied ? 'Copied!' : 'Copy'}
+                  </button>
+                </div>
+                <p className="text-[10px] text-zinc-600">Single-use link — expires after one interview is started.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Unlock toast */}
+      {unlockMsg && (
+        <div
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-5 py-2.5 rounded-lg text-sm text-white pointer-events-none"
+          style={{ background: 'rgba(30,30,35,0.97)', border: '1px solid rgba(255,255,255,0.12)', boxShadow: '0 4px 24px rgba(0,0,0,0.5)' }}
+        >
+          {unlockMsg}
+        </div>
       )}
     </main>
   );
